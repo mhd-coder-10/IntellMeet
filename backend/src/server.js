@@ -1,16 +1,21 @@
 const dotenv = require("dotenv");
 const app = require("./app");
-const connectDatabase = require("./config/database");
+const connectDB = require("./config/database");
 
 dotenv.config();
 
 const PORT = process.env.PORT || 5100;
 
-connectDatabase();
+const startServer = async () => {
+  await connectDB()
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`)
+    console.log(`Environment: ${process.env.NODE_ENV}\n`)
+  })
+}
 
-app.listen(PORT, () => {
-  console.log(`\nIntellMeet backend running on port ${PORT}`);
-});
+startServer();
+
 
 
 
