@@ -12,7 +12,7 @@ app.use(express.urlencoded({extended : true}));
 app.use(express.json());
 
 // Health check
-app.get("/api/health", (req, res) => {
+app.get("/api/qw", (req, res) => {
   res.status(200).json({
     status: 'OK',
     message: 'IntelliMeet API is running',
