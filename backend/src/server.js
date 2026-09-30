@@ -19,7 +19,7 @@ const startServer = async () => {
     app.set("io", io)
 
     httpServer.listen(PORT, () => {
-      console.log(`\nServer running on http://localhost:${PORT}`)
+      console.log(`Server running on http://localhost:${PORT}`)
       console.log(`Environment: ${process.env.NODE_ENV}`)
       console.log(`Socket.io ready for connections\n`)
     })
@@ -30,8 +30,4 @@ const startServer = async () => {
 }
 
 startServer();
-
-
-
-
 
