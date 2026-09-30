@@ -104,10 +104,26 @@ const joinMeeting = async (req, res) => {
             req.params.id,
             req.user.id
         )
+
+        const io = req.app.get("io")
+        if (io && data.userJoined) {
+            const roomManager = require("../webrtc/roomManager")
+            const users = roomManager.getRoomUsers(req.params.id)
+
+            io.to(req.params.id).emit("meeting:user-joined", {
+                userId: data.userJoined.userId,
+                username: data.userJoined.username,
+                name: data.userJoined.name,
+                profilePicture: data.userJoined.profilePicture,
+                totalUsers: users.length,
+                source: "http",
+            })
+        }
+
         res.status(200).json({
             success: true,
             message: "Joined meeting successfully",
-            data,
+            data: { meeting: data.meeting },
         })
     } catch (error) {
         res.status(error.statusCode || 500).json({
@@ -124,7 +140,20 @@ const leaveMeeting = async (req, res) => {
             req.params.id,
             req.user.id
         )
-        res.status(200).json({ success: true, ...data })
+
+        const io = req.app.get("io")
+        if (io && data.userLeft) {
+            io.to(req.params.id).emit("meeting:user-left", {
+                userId: data.userLeft.userId,
+                name: data.userLeft.name,
+                username: data.userLeft.username,
+            })
+        }
+
+        res.status(200).json({
+            success: true,
+            message: data.message,
+        })
     } catch (error) {
         res.status(error.statusCode || 500).json({
             success: false,
@@ -160,6 +189,17 @@ const endMeeting = async (req, res) => {
             req.params.id,
             req.user.id
         )
+
+        const io = req.app.get("io");
+        if (io) {
+            io.to(req.params.id).emit("meeting:ended", {
+                meetingId: req.params.id,
+                message: "Meeting has been ended by the host",
+            })
+
+            io.in(req.params.id).socketsLeave(req.params.id)
+        }
+
         res.status(200).json({
             success: true,
             message: "Meeting ended",

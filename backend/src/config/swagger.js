@@ -7,7 +7,7 @@ const options = {
       title: "IntelliMeet API",
       version: "1.0.0",
       description:
-        "AI-Powered Enterprise Meeting and Collaboration Platform API.",
+        "AI-Powered Enterprise Meeting and Collaboration Platform API",
     },
     servers: [
       {
@@ -27,6 +27,14 @@ const options = {
       {
         name: "Meetings",
         description: "Meeting creation and management endpoints",
+      },
+      {
+        name: "Chat",
+        description: "Real-time chat in meetings"
+      },
+      {
+        name: "Notifications",
+        description: "User notifications"
       },
     ],
     components: {

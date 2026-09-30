@@ -23,6 +23,7 @@ const protect = async (req, res, next) => {
     const decoded = verifyToken(token, process.env.JWT_SECRET);
 
     const user = await User.findById(decoded.id);
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -30,9 +31,17 @@ const protect = async (req, res, next) => {
       });
     }
 
-    req.user = { id: user._id, email: user.email, role: user.role };
+    req.user = {
+      id: user._id,
+      name: user.name,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      profilePicture: user.profilePicture,
+    }
+
     next();
-    
+
   } catch (error) {
     return res.status(401).json({
       success: false,

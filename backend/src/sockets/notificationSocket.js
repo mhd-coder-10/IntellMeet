@@ -1,5 +1,6 @@
+
 // Handles real-time notification events for each user
-// Each user joins a personal room based on their user id
+// Also provides helper to push notifications from other services
 
 const registerNotificationHandlers = (io, socket) => {
   socket.join(`user:${socket.user.id}`)

@@ -1,249 +1,11 @@
-// // Contains all meeting business logic
-// // Handles create, update, delete, join, leave, start and end operations
-
-// const meetingRepo = require("../repositories/meetingRepository")
-// const userRepo = require("../repositories/userRepository")
-
-// // Generate unique meeting code
-// const generateMeetingCode = () => {
-//     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-//     let code = ""
-//     for (let i = 0; i < 8; i++) {
-//         code += chars.charAt(Math.floor(Math.random() * chars.length))
-//     }
-//     return code
-// }
-
-// // Create a new meeting
-// const createMeeting = async (userId, data) => {
-//     const { title, description, scheduledAt, settings } = data
-
-//     if (!title) {
-//         const error = new Error("Meeting title is required")
-//         error.statusCode = 400
-//         throw error
-//     }
-
-//     const host = await userRepo.findById(userId)
-//     if (!host) {
-//         const error = new Error("Host user not found")
-//         error.statusCode = 404
-//         throw error
-//     }
-
-//     let meetingCode = generateMeetingCode()
-//     let existing = await meetingRepo.findByCode(meetingCode)
-
-//     while (existing) {
-//         meetingCode = generateMeetingCode()
-//         existing = await meetingRepo.findByCode(meetingCode)
-//     }
-
-//     const meeting = await meetingRepo.create({
-//         title,
-//         description: description || "",
-//         host: userId,
-//         meetingCode,
-//         scheduledAt: scheduledAt || new Date(),
-//         settings: settings || {},
-//     })
-
-//     return { meeting }
-// }
-
-// // Get meeting by ID
-// const getMeetingById = async (meetingId) => {
-//     const meeting = await meetingRepo.findByIdPopulated(meetingId);
-
-//     if (!meeting) {
-//         const error = new Error("Meeting not found")
-//         error.statusCode = 404
-//         throw error
-//     }
-//     return { meeting }
-// }
-
-// // Get meeting by code
-// const getMeetingByCode = async (code) => {
-//     const meeting = await meetingRepo.findByCode(code)
-//     if (!meeting) {
-//         const error = new Error("Invalid meeting code")
-//         error.statusCode = 404
-//         throw error
-//     }
-//     return { meeting }
-// }
-
-// // Get all meetings of logged in user
-// const getUserMeetings = async (userId) => {
-//     const meetings = await meetingRepo.findByUser(userId)
-//     return { meetings }
-// }
-
-// // Update meeting details
-// const updateMeeting = async (meetingId, userId, updateData) => {
-//     const meeting = await meetingRepo.findById(meetingId)
-//     if (!meeting) {
-//         const error = new Error("Meeting not found")
-//         error.statusCode = 404
-//         throw error
-//     }
-
-//     if (meeting.host.toString() !== userId.toString()) {
-//         const error = new Error("Only host can update the meeting")
-//         error.statusCode = 403
-//         throw error
-//     }
-
-//     const allowedFields = ["title", "description", "scheduledAt", "settings"]
-//     const updates = {}
-
-//     allowedFields.forEach((field) => {
-//         if (updateData[field] !== undefined) {
-//             updates[field] = updateData[field]
-//         }
-//     })
-
-//     const updated = await meetingRepo.updateById(meetingId, updates)
-//     return { meeting: updated }
-// }
-
-// // Delete meeting
-// const deleteMeeting = async (meetingId, userId) => {
-//     const meeting = await meetingRepo.findById(meetingId);
-//     if (!meeting) {
-//         const error = new Error("Meeting not found")
-//         error.statusCode = 404
-//         throw error
-//     }
-
-//     if (meeting.host.toString() !== userId.toString()) {
-//         const error = new Error("Only host can delete the meeting")
-//         error.statusCode = 403
-//         throw error
-//     }
-
-//     await meetingRepo.deleteById(meetingId)
-//     return { message: "Meeting deleted successfully" }
-// }
-
-// // Join meeting
-// const joinMeeting = async (meetingId, userId) => {
-//     const meeting = await meetingRepo.findById(meetingId)
-//     if (!meeting) {
-//         const error = new Error("Meeting not found")
-//         error.statusCode = 404
-//         throw error
-//     }
-
-//     if (meeting.status === "completed" || meeting.status === "cancelled") {
-//         const error = new Error("This meeting is no longer active")
-//         error.statusCode = 400
-//         throw error
-//     }
-
-//     if (meeting.host.toString() === userId.toString()) {
-//         return { meeting }
-//     }
-
-//     const alreadyJoined = meeting.participants.some(
-//         (p) => p.toString() === userId.toString()
-//     )
-//     if (alreadyJoined) {
-//         return { meeting }
-//     }
-
-//     const updated = await meetingRepo.addParticipant(meetingId, userId)
-//     return { meeting: updated }
-// }
-
-// // Leave meeting
-// const leaveMeeting = async (meetingId, userId) => {
-//     const meeting = await meetingRepo.findById(meetingId)
-//     if (!meeting) {
-//         const error = new Error("Meeting not found")
-//         error.statusCode = 404
-//         throw error
-//     }
-
-//     if (meeting.host.toString() === userId.toString()) {
-//         const error = new Error("Host cannot leave. Please end the meeting")
-//         error.statusCode = 400
-//         throw error
-//     }
-
-//     await meetingRepo.removeParticipant(meetingId, userId)
-//     return { message: "Left meeting successfully" }
-// }
-
-// // Start meeting
-// const startMeeting = async (meetingId, userId) => {
-//     const meeting = await meetingRepo.findById(meetingId)
-//     if (!meeting) {
-//         const error = new Error("Meeting not found")
-//         error.statusCode = 404
-//         throw error
-//     }
-
-//     if (meeting.host.toString() !== userId.toString()) {
-//         const error = new Error("Only host can start the meeting")
-//         error.statusCode = 403
-//         throw error
-//     }
-
-//     const updated = await meetingRepo.updateById(meetingId, {
-//         status: "ongoing",
-//         startedAt: new Date(),
-//     })
-
-//     return { meeting: updated }
-// }
-
-// // End meeting
-// const endMeeting = async (meetingId, userId) => {
-//     const meeting = await meetingRepo.findById(meetingId)
-//     if (!meeting) {
-//         const error = new Error("Meeting not found")
-//         error.statusCode = 404
-//         throw error
-//     }
-
-//     if (meeting.host.toString() !== userId.toString()) {
-//         const error = new Error("Only host can end the meeting")
-//         error.statusCode = 403
-//         throw error
-//     }
-
-//     const updated = await meetingRepo.updateById(meetingId, {
-//         status: "completed",
-//         endedAt: new Date(),
-//     })
-
-//     return { meeting: updated }
-// }
-
-// module.exports = {
-//     createMeeting,
-//     getMeetingById,
-//     getMeetingByCode,
-//     getUserMeetings,
-//     updateMeeting,
-//     deleteMeeting,
-//     joinMeeting,
-//     leaveMeeting,
-//     startMeeting,
-//     endMeeting,
-// }
-
-
-
-
-
-
-
+// Contains all meeting business logic with Redis caching
+// Also triggers notifications when meeting starts or ends
 
 const meetingRepo = require("../repositories/meetingRepository");
 const userRepo = require("../repositories/userRepository");
+const notificationService = require("./notificationService");
+const roomManager = require("../webrtc/roomManager");
+
 
 const {
   getCache,
@@ -251,7 +13,6 @@ const {
   deleteCacheByPattern,
 } = require("../utils/redisHelpers")
 
-// Generate unique meeting code
 const generateMeetingCode = () => {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
   let code = ""
@@ -261,7 +22,6 @@ const generateMeetingCode = () => {
   return code
 }
 
-
 const clearMeetingCaches = async (meetingId, hostId) => {
   await deleteCacheByPattern(`meeting:${meetingId}*`)
   if (hostId) {
@@ -270,7 +30,21 @@ const clearMeetingCaches = async (meetingId, hostId) => {
   await deleteCacheByPattern("user:*:meetings")
 }
 
-// Create a new meeting
+const notifyParticipants = async (meeting, hostId, type, title, message) => {
+  const participants = meeting.participants || []
+  for (const participantId of participants) {
+    if (participantId.toString() === hostId.toString()) continue
+    await notificationService.createNotification({
+      recipient: participantId,
+      sender: hostId,
+      type,
+      title,
+      message,
+      link: `/meetings/${meeting._id}`,
+    })
+  }
+}
+
 const createMeeting = async (userId, data) => {
   const { title, description, scheduledAt, settings } = data
 
@@ -308,7 +82,6 @@ const createMeeting = async (userId, data) => {
   return { meeting }
 }
 
-// Get meeting by ID
 const getMeetingById = async (meetingId) => {
   const cacheKey = `meeting:${meetingId}`
   const cached = await getCache(cacheKey)
@@ -326,7 +99,6 @@ const getMeetingById = async (meetingId) => {
   return result
 }
 
-// Get meeting by code 
 const getMeetingByCode = async (code) => {
   const meeting = await meetingRepo.findByCode(code)
   if (!meeting) {
@@ -337,7 +109,6 @@ const getMeetingByCode = async (code) => {
   return { meeting }
 }
 
-// Get all meetings of logged in user
 const getUserMeetings = async (userId) => {
   const cacheKey = `user:${userId}:meetings`
   const cached = await getCache(cacheKey)
@@ -350,7 +121,6 @@ const getUserMeetings = async (userId) => {
   return result
 }
 
-// Update meeting details
 const updateMeeting = async (meetingId, userId, updateData) => {
   const meeting = await meetingRepo.findById(meetingId)
   if (!meeting) {
@@ -381,7 +151,6 @@ const updateMeeting = async (meetingId, userId, updateData) => {
   return { meeting: updated }
 }
 
-// Delete meeting
 const deleteMeeting = async (meetingId, userId) => {
   const meeting = await meetingRepo.findById(meetingId)
   if (!meeting) {
@@ -402,7 +171,6 @@ const deleteMeeting = async (meetingId, userId) => {
   return { message: "Meeting deleted successfully" }
 }
 
-// Join meeting
 const joinMeeting = async (meetingId, userId) => {
   const meeting = await meetingRepo.findById(meetingId)
   if (!meeting) {
@@ -424,17 +192,53 @@ const joinMeeting = async (meetingId, userId) => {
   const alreadyJoined = meeting.participants.some(
     (p) => p.toString() === userId.toString()
   )
-  if (alreadyJoined) {
-    return { meeting }
+
+  const user = await userRepo.findById(userId)
+
+  if (!alreadyJoined) {
+    await meetingRepo.addParticipant(meetingId, userId)
+    await clearMeetingCaches(meetingId, userId)
+
+    try {
+      await notificationService.createNotification({
+        recipient: meeting.host,
+        sender: userId,
+        type: "system",
+        title: "Participant Joined",
+        message: `${user?.name || "A user"} joined your meeting "${meeting.title}"`,
+        link: `/meetings/${meetingId}`,
+      })
+    } catch (err) {
+      console.log("Join notification error:", err.message)
+    }
   }
 
-  const updated = await meetingRepo.addParticipant(meetingId, userId)
-  await clearMeetingCaches(meetingId, userId)
+  const roomManager = require("../webrtc/roomManager")
+  const existingRoomUser = roomManager
+    .getRoomUsers(meetingId)
+    .find((u) => u.userId.toString() === userId.toString())
 
-  return { meeting: updated }
+  if (!existingRoomUser) {
+    roomManager.addUserToRoom(meetingId, userId, null, {
+      name: user?.name || "A user",
+      username: user?.username || "unknown",
+      profilePicture: user?.profilePicture || "",
+    })
+  }
+
+  const updated = await meetingRepo.findById(meetingId)
+
+  return {
+    meeting: updated,
+    userJoined: {
+      userId: userId,
+      name: user?.name || "A user",
+      username: user?.username || "unknown",
+      profilePicture: user?.profilePicture || "",
+    },
+  }
 }
 
-// Leave meeting
 const leaveMeeting = async (meetingId, userId) => {
   const meeting = await meetingRepo.findById(meetingId)
   if (!meeting) {
@@ -449,13 +253,38 @@ const leaveMeeting = async (meetingId, userId) => {
     throw error
   }
 
+  const user = await userRepo.findById(userId)
+
   await meetingRepo.removeParticipant(meetingId, userId)
   await clearMeetingCaches(meetingId, userId)
 
-  return { message: "Left meeting successfully" }
+  const roomManager = require("../webrtc/roomManager")
+  roomManager.removeUserFromRoom(meetingId, userId)
+
+  try {
+    await notificationService.createNotification({
+      recipient: meeting.host,
+      sender: userId,
+      type: "system",
+      title: "Participant Left",
+      message: `${user?.name || "A user"} left your meeting "${meeting.title}"`,
+      link: `/meetings/${meetingId}`,
+    })
+  } catch (err) {
+    console.log("Leave notification error:", err.message)
+  }
+
+  return {
+    message: "Left meeting successfully",
+    meetingId,
+    userLeft: {
+      userId: userId,
+      name: user?.name || "A user",
+      username: user?.username || "unknown",
+    },
+  }
 }
 
-// startr meeting
 const startMeeting = async (meetingId, userId) => {
   const meeting = await meetingRepo.findById(meetingId)
   if (!meeting) {
@@ -477,10 +306,17 @@ const startMeeting = async (meetingId, userId) => {
 
   await clearMeetingCaches(meetingId, userId)
 
+  await notifyParticipants(
+    updated,
+    userId,
+    "meeting_started",
+    "Meeting Started",
+    `${updated.title} has been started by the host`
+  )
+
   return { meeting: updated }
 }
 
-// End meeting
 const endMeeting = async (meetingId, userId) => {
   const meeting = await meetingRepo.findById(meetingId)
   if (!meeting) {
@@ -502,7 +338,17 @@ const endMeeting = async (meetingId, userId) => {
 
   await clearMeetingCaches(meetingId, userId)
 
-  return { meeting: updated }
+  await notifyParticipants(
+    updated,
+    userId,
+    "meeting_ended",
+    "Meeting Ended",
+    `${updated.title} has been ended by the host`
+  )
+
+  roomManager.clearRoom(meetingId);
+
+  return { meeting: updated, meetingId }
 }
 
 module.exports = {
