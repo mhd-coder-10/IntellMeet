@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>IntelliMeet Socket Test</title>
+  <style>
+    body { font-family: Arial; padding: 20px; background: #111; color: #fff; }
+    input, button { padding: 8px; margin: 5px; background: #333; color: #fff; border: 1px solid #555; }
+    #log { background: #000; padding: 10px; height: 400px; overflow-y: auto; border: 1px solid #333; font-family: monospace; margin-top: 10px; }
+    .info { color: #4af; }
+    .success { color: #4f4; }
+    .error { color: #f44; }
+  </style>
+</head>
+<body>
+  <h1>IntelliMeet Socket.io Test</h1>
+  
+  <input type="text" id="token" placeholder="Paste access token here" style="width: 400px">
+  <button onclick="connect()">Connect</button>
+  
+  <br>
+  <input type="text" id="meetingId" placeholder="Meeting ID" value="6aba77d284d32832ef0a95da">
+  <button onclick="joinMeeting()">Join</button>
+  <button onclick="leaveMeeting()">Leave</button>
+  
+  <br>
+  <input type="text" id="message" placeholder="Chat message" style="width: 300px">
+  <button onclick="sendChat()">Send</button>
+  
+  <div id="log"></div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    let socket = null
+
+    const log = (msg, type = '') => {
+      const logDiv = document.getElementById('log')
+      logDiv.innerHTML += `<div class="${type}">[${new Date().toLocaleTimeString()}] ${msg}</div>`
+      logDiv.scrollTop = logDiv.scrollHeight
+    }
+
+    const connect = () => {
+      const token = document.getElementById('token').value.trim()
+      if (!token) {
+        log('Token required', 'error')
+        return
+      }
+
+      socket = io("http://localhost:5100", { auth: { token } })
+
+      socket.on("connect", () => {
+        log(`Connected: ${socket.id}`, 'success')
+      })
+
+      socket.on("connect_error", (err) => {
+        log(`Error: ${err.message}`, 'error')
+      })
+
+      socket.on("meeting:joined", (data) => {
+        log(`Joined meeting. Users: ${data.users.length}`, 'success')
+        data.users.forEach(u => log(`   -> ${u.name} (@${u.username})`))
+      })
+
+      socket.on("meeting:user-joined", (data) => {
+        log(`${data.name} joined (total: ${data.totalUsers})`, 'info')
+      })
+
+      socket.on("meeting:user-left", (data) => {
+        log(`${data.name || data.username} left`, 'info')
+      })
+
+      socket.on("meeting:error", (data) => {
+        log(`Error: ${data.message}`, 'error')
+      })
+
+      socket.on("meeting:ended", (data) => {
+        log(`Meeting ended: ${data.message}`, 'error')
+      })
+
+      socket.on("chat:message", (data) => {
+        log(`${data.sender.name}: ${data.message}`, 'success')
+      })
+
+      socket.on("disconnect", () => {
+        log('Disconnected', 'error')
+      })
+    }
+
+    const joinMeeting = () => {
+      if (!socket) return log('Connect first', 'error')
+      const meetingId = document.getElementById('meetingId').value.trim()
+      socket.emit("meeting:join", { meetingId })
+      log(`Joining meeting: ${meetingId}...`, 'info')
+    }
+
+    const leaveMeeting = () => {
+      if (!socket) return
+      const meetingId = document.getElementById('meetingId').value.trim()
+      socket.emit("meeting:leave", { meetingId })
+      log(`Leaving meeting...`)
+    }
+
+    const sendChat = () => {
+      if (!socket) return
+      const meetingId = document.getElementById('meetingId').value.trim()
+      const message = document.getElementById('message').value.trim()
+      if (!message) return
+      socket.emit("chat:send", { meetingId, message })
+      document.getElementById('message').value = ''
+    }
+  </script>
+</body>
+</html>

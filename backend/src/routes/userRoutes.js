@@ -1,10 +1,17 @@
+
 const express = require("express")
 const router = express.Router()
 
-const usercontroller = require("../controllers/userController");
+const {
+  getProfile,
+  updateProfile,
+  updateAvatar,
+  removeAvatar,
+  updatePassword,
+} = require("../controllers/userController")
 
-const { protect } = require("../middleware/auth.middleware");
-const upload = require("../middleware/upload.middleware");
+const { protect } = require("../middleware/auth.middleware")
+const upload = require("../middleware/upload.middleware")
 
 /**
  * @swagger
@@ -17,10 +24,8 @@ const upload = require("../middleware/upload.middleware");
  *         description: User profile fetched
  *       401:
  *         description: Not authorized
- *       404:
- *         description: User not found
  */
-router.get("/profile", protect, usercontroller.getProfile);
+router.get("/profile", protect, getProfile)
 
 /**
  * @swagger
@@ -49,7 +54,7 @@ router.get("/profile", protect, usercontroller.getProfile);
  *       409:
  *         description: Username already taken
  */
-router.put("/profile", protect, usercontroller.updateProfile);
+router.put("/profile", protect, updateProfile)
 
 /**
  * @swagger
@@ -75,7 +80,23 @@ router.put("/profile", protect, usercontroller.updateProfile);
  *       401:
  *         description: Not authorized
  */
-router.put("/avatar", protect, upload.single("avatar"), usercontroller.updateAvatar);
+router.put("/avatar", protect, upload.single("avatar"), updateAvatar)
+
+/**
+ * @swagger
+ * /users/avatar:
+ *   delete:
+ *     summary: Remove user avatar image
+ *     tags: [Users]
+ *     responses:
+ *       200:
+ *         description: Avatar removed successfully
+ *       400:
+ *         description: No avatar to remove
+ *       401:
+ *         description: Not authorized
+ */
+router.delete("/avatar", protect, removeAvatar)
 
 /**
  * @swagger
@@ -103,6 +124,6 @@ router.put("/avatar", protect, upload.single("avatar"), usercontroller.updateAva
  *       401:
  *         description: Current password is incorrect
  */
-router.put("/password", protect, usercontroller.updatePassword);
+router.put("/password", protect, updatePassword)
 
 module.exports = router

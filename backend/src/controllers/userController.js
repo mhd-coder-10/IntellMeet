@@ -1,3 +1,5 @@
+
+
 const userService = require("../services/userService")
 
 // Get current user profile
@@ -47,6 +49,23 @@ const updateAvatar = async (req, res) => {
   }
 }
 
+// Remove avatar image
+const removeAvatar = async (req, res) => {
+  try {
+    const data = await userService.removeAvatar(req.user.id)
+    res.status(200).json({
+      success: true,
+      message: "Avatar removed successfully",
+      data,
+    })
+  } catch (error) {
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    })
+  }
+}
+
 // Update user password
 const updatePassword = async (req, res) => {
   try {
@@ -68,4 +87,10 @@ const updatePassword = async (req, res) => {
   }
 }
 
-module.exports = { getProfile, updateProfile, updateAvatar, updatePassword }
+module.exports = {
+  getProfile,
+  updateProfile,
+  updateAvatar,
+  removeAvatar,
+  updatePassword,
+}

@@ -1,5 +1,14 @@
-const User = require("../models/User")
+
+const userRepo = require("../repositories/userRepository")
 const cloudinary = require("../config/cloudinary")
+
+// Extract cloudinary public id from secure url
+const extractPublicId = (url) => {
+  const parts = url.split("/")
+  const filename = parts[parts.length - 1]
+  const folder = parts[parts.length - 2]
+  return `${folder}/${filename.split(".")[0]}`
+}
 
 // Upload buffer to cloudinary and return result
 const uploadToCloudinary = (buffer) => {
@@ -18,9 +27,20 @@ const uploadToCloudinary = (buffer) => {
   })
 }
 
+// Delete image from cloudinary using url
+const deleteFromCloudinary = async (url) => {
+  if (!url) return
+  try {
+    const publicId = extractPublicId(url)
+    await cloudinary.uploader.destroy(publicId)
+  } catch (err) {
+    console.log("Cloudinary delete failed:", err.message)
+  }
+}
+
 // Get logged in user profile
 const getProfile = async (userId) => {
-  const user = await User.findById(userId).select("-password")
+  const user = await userRepo.findById(userId, "-password")
   if (!user) {
     const error = new Error("User not found")
     error.statusCode = 404
@@ -40,24 +60,16 @@ const updateProfile = async (userId, updateData) => {
     }
   })
 
-  // Check username availability
   if (updates.username) {
-    const existing = await User.findOne({
-      username: updates.username,
-      _id: { $ne: userId },
-    })
-    if (existing) {
+    const existing = await userRepo.findByUsername(updates.username)
+    if (existing && existing._id.toString() !== userId.toString()) {
       const error = new Error("Username already taken")
       error.statusCode = 409
       throw error
     }
   }
 
-  const user = await User.findByIdAndUpdate(userId, updates, {
-    new: true,
-    runValidators: true,
-  }).select("-password")
-
+  const user = await userRepo.updateById(userId, updates)
   if (!user) {
     const error = new Error("User not found")
     error.statusCode = 404
@@ -67,7 +79,7 @@ const updateProfile = async (userId, updateData) => {
   return { user }
 }
 
-// Update user avatar using cloudinary
+// Update user avatar by replacing old image
 const updateAvatar = async (userId, fileBuffer) => {
   if (!fileBuffer) {
     const error = new Error("No file provided")
@@ -75,40 +87,64 @@ const updateAvatar = async (userId, fileBuffer) => {
     throw error
   }
 
-  const user = await User.findById(userId)
+  const user = await userRepo.findById(userId)
   if (!user) {
     const error = new Error("User not found")
     error.statusCode = 404
     throw error
   }
 
-  // Delete old avatar if exists
+  // Delete old avatar from cloudinary
   if (user.profilePicture) {
-    try {
-      const publicId = user.profilePicture
-        .split("/")
-        .slice(-2)
-        .join("/")
-        .split(".")[0]
-      await cloudinary.uploader.destroy(publicId)
-    } catch (err) {
-      console.log("Old avatar deletion failed:", err.message)
-    }
+    await deleteFromCloudinary(user.profilePicture)
   }
 
+  // Upload new avatar
   const result = await uploadToCloudinary(fileBuffer)
 
-  user.profilePicture = result.secure_url
-  await user.save({ validateBeforeSave: false })
+  const updated = await userRepo.updateAvatar(userId, result.secure_url)
 
   return {
     user: {
-      id: user._id,
-      name: user.name,
-      username: user.username,
-      email: user.email,
-      profilePicture: user.profilePicture,
-      role: user.role,
+      id: updated._id,
+      name: updated.name,
+      username: updated.username,
+      email: updated.email,
+      profilePicture: updated.profilePicture,
+      role: updated.role,
+    },
+  }
+}
+
+// Remove user avatar from cloudinary and database
+const removeAvatar = async (userId) => {
+  const user = await userRepo.findById(userId)
+  if (!user) {
+    const error = new Error("User not found")
+    error.statusCode = 404
+    throw error
+  }
+
+  if (!user.profilePicture) {
+    const error = new Error("No avatar to remove")
+    error.statusCode = 400
+    throw error
+  }
+
+  // Delete from cloudinary
+  await deleteFromCloudinary(user.profilePicture)
+
+  // Clear from database
+  const updated = await userRepo.removeAvatar(userId)
+
+  return {
+    user: {
+      id: updated._id,
+      name: updated.name,
+      username: updated.username,
+      email: updated.email,
+      profilePicture: updated.profilePicture,
+      role: updated.role,
     },
   }
 }
@@ -127,14 +163,13 @@ const updatePassword = async (userId, currentPassword, newPassword) => {
     throw error
   }
 
-  const user = await User.findById(userId).select("+password")
+  const user = await userRepo.findByIdWithPassword(userId)
   if (!user) {
     const error = new Error("User not found")
     error.statusCode = 404
     throw error
   }
 
-  // Verify current password
   const isMatch = await user.comparePassword(currentPassword)
   if (!isMatch) {
     const error = new Error("Current password is incorrect")
@@ -142,10 +177,11 @@ const updatePassword = async (userId, currentPassword, newPassword) => {
     throw error
   }
 
-  // Prevent same password
   const isSame = await user.comparePassword(newPassword)
   if (isSame) {
-    const error = new Error("New password must be different from current password")
+    const error = new Error(
+      "New password must be different from current password"
+    )
     error.statusCode = 400
     throw error
   }
@@ -160,5 +196,6 @@ module.exports = {
   getProfile,
   updateProfile,
   updateAvatar,
+  removeAvatar,
   updatePassword,
 }
