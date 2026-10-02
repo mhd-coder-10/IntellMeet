@@ -185,10 +185,7 @@ const startMeeting = async (req, res) => {
 // End meeting
 const endMeeting = async (req, res) => {
     try {
-        const data = await meetingService.endMeeting(
-            req.params.id,
-            req.user.id
-        )
+        const data = await meetingService.endMeeting(req.params.id, req.user.id);
 
         const io = req.app.get("io");
         if (io) {
@@ -197,7 +194,7 @@ const endMeeting = async (req, res) => {
                 message: "Meeting has been ended by the host",
             })
 
-            io.in(req.params.id).socketsLeave(req.params.id)
+            io.in(req.params.id).socketsLeave(req.params.id);
         }
 
         res.status(200).json({
@@ -205,6 +202,21 @@ const endMeeting = async (req, res) => {
             message: "Meeting ended",
             data,
         })
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message,
+        })
+    }
+}
+
+const hideMeeting = async (req, res) => {
+    try {
+        const data = await meetingService.hideMeetingFromUser(
+            req.params.id,
+            req.user.id
+        )
+        res.status(200).json({ success: true, ...data })
     } catch (error) {
         res.status(error.statusCode || 500).json({
             success: false,
@@ -224,4 +236,5 @@ module.exports = {
     leaveMeeting,
     startMeeting,
     endMeeting,
+    hideMeeting,
 }

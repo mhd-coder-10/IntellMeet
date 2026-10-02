@@ -81,8 +81,20 @@ const userSchema = new mongoose.Schema(
       default: null,
       select: false,
     },
+    attendedMeetings: [
+      {
+        meeting: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Meeting",
+        },
+        leftAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
 
-  },{timestamps: true});
+  }, { timestamps: true });
 
 
 // Hash password before saving user

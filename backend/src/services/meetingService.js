@@ -110,15 +110,32 @@ const getMeetingByCode = async (code) => {
 }
 
 const getUserMeetings = async (userId) => {
-  const cacheKey = `user:${userId}:meetings`
-  const cached = await getCache(cacheKey)
-  if (cached) return cached
+  const Meeting = require("../models/Meeting")
+  const user = await userRepo.findById(userId)
+  if (!user) {
+    const error = new Error("User not found")
+    error.statusCode = 404
+    throw error
+  }
 
-  const meetings = await meetingRepo.findByUser(userId)
-  const result = { meetings }
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000)
 
-  await setCache(cacheKey, result, 60)
-  return result
+  const recentAttendedIds = (user.attendedMeetings || [])
+    .filter((a) => a.leftAt > tenMinutesAgo)
+    .map((a) => a.meeting)
+
+  const meetings = await Meeting.find({
+    $or: [
+      { host: userId },
+      { participants: userId },
+      { _id: { $in: recentAttendedIds } },
+    ],
+  })
+    .populate("host", "name username profilePicture")
+    .populate("participants", "name username profilePicture")
+    .sort({ createdAt: -1 })
+
+  return { meetings }
 }
 
 const updateMeeting = async (meetingId, userId, updateData) => {
@@ -240,26 +257,42 @@ const joinMeeting = async (meetingId, userId) => {
 }
 
 const leaveMeeting = async (meetingId, userId) => {
-  const meeting = await meetingRepo.findById(meetingId)
+  const meeting = await meetingRepo.findById(meetingId);
   if (!meeting) {
-    const error = new Error("Meeting not found")
-    error.statusCode = 404
-    throw error
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
   }
 
   if (meeting.host.toString() === userId.toString()) {
-    const error = new Error("Host cannot leave. Please end the meeting")
-    error.statusCode = 400
-    throw error
+    const error = new Error("Host cannot leave. Please end the meeting");
+    error.statusCode = 400;
+    throw error;
   }
 
-  const user = await userRepo.findById(userId)
+  const user = await userRepo.findById(userId);
 
-  await meetingRepo.removeParticipant(meetingId, userId)
-  await clearMeetingCaches(meetingId, userId)
+  await meetingRepo.removeParticipant(meetingId, userId);
+  await clearMeetingCaches(meetingId, userId);
 
-  const roomManager = require("../webrtc/roomManager")
-  roomManager.removeUserFromRoom(meetingId, userId)
+  const roomManager = require("../webrtc/roomManager");
+  roomManager.removeUserFromRoom(meetingId, userId);
+
+  // Add to user's attended history
+  if (user) {
+    const existing = user.attendedMeetings.find(
+      (a) => a.meeting.toString() === meetingId.toString()
+    );
+    if (existing) {
+      existing.leftAt = new Date();
+    } else {
+      user.attendedMeetings.push({
+        meeting: meetingId,
+        leftAt: new Date(),
+      });
+    }
+    await user.save({ validateBeforeSave: false });
+  }
 
   try {
     await notificationService.createNotification({
@@ -269,9 +302,9 @@ const leaveMeeting = async (meetingId, userId) => {
       title: "Participant Left",
       message: `${user?.name || "A user"} left your meeting "${meeting.title}"`,
       link: `/meetings/${meetingId}`,
-    })
+    });
   } catch (err) {
-    console.log("Leave notification error:", err.message)
+    console.log("Leave notification error:", err.message);
   }
 
   return {
@@ -282,8 +315,8 @@ const leaveMeeting = async (meetingId, userId) => {
       name: user?.name || "A user",
       username: user?.username || "unknown",
     },
-  }
-}
+  };
+};
 
 const startMeeting = async (meetingId, userId) => {
   const meeting = await meetingRepo.findById(meetingId)
@@ -351,6 +384,23 @@ const endMeeting = async (meetingId, userId) => {
   return { meeting: updated, meetingId }
 }
 
+// Remove meeting from user's attended history (hides from their list)
+const hideMeetingFromUser = async (meetingId, userId) => {
+  const user = await userRepo.findById(userId)
+  if (!user) {
+    const error = new Error("User not found")
+    error.statusCode = 404
+    throw error
+  }
+
+  user.attendedMeetings = user.attendedMeetings.filter(
+    (a) => a.meeting.toString() !== meetingId.toString()
+  )
+  await user.save({ validateBeforeSave: false })
+
+  return { message: "Meeting removed from your list" }
+}
+
 module.exports = {
   createMeeting,
   getMeetingById,
@@ -362,4 +412,5 @@ module.exports = {
   leaveMeeting,
   startMeeting,
   endMeeting,
+  hideMeetingFromUser,
 }

@@ -132,7 +132,17 @@ const getCurrentUser = async (userId) => {
     error.statusCode = 404
     throw error
   }
-  return { user }
+  return {
+    user: {
+      id: user._id,
+      name: user.name,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      profilePicture: user.profilePicture,
+      bio: user.bio,
+    },
+  }
 }
 
 module.exports = {
