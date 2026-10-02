@@ -16,6 +16,7 @@ const {
   leaveMeeting,
   startMeeting,
   endMeeting,
+  hideMeeting,
 } = require("../controllers/meetingController")
 
 const { protect } = require("../middleware/auth.middleware")
@@ -66,6 +67,24 @@ router.post("/", protect, createMeeting);
  *         description: Not authorized
  */
 router.get("/", protect, getUserMeetings);
+
+/**
+ * @swagger
+ * /meetings/{id}/hide:
+ *   delete:
+ *     summary: Remove meeting from user's list (not from DB)
+ *     tags: [Meetings]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Meeting removed from list
+ */
+router.delete("/:id/hide", protect, hideMeeting)
 
 /**
  * @swagger

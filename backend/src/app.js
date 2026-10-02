@@ -10,8 +10,14 @@ const routes = require('./index');
 const app = express();
 
 app.use(helmet());
-app.use(cors());
-app.use(express.urlencoded({extended : true}));
+
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  credentials: true,
+}));
+
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(morgan("dev"));
 
