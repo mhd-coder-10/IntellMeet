@@ -1,85 +1,52 @@
- // Handles real-time chat events and saves messages to database
-// Also detects @mentions and notifies mentioned users
+// Handles real-time chat events and saves messages to database
+// Host can delete messages via chat:delete event
 
-const chatService = require("../services/chatService")
-const notificationService = require("../services/notificationService")
-const userRepo = require("../repositories/userRepository")
-
-const extractMentions = (message) => {
-  const regex = /@(\w+)/g
-  const mentions = []
-  let match
-  while ((match = regex.exec(message)) !== null) {
-    mentions.push(match[1])
-  }
-  return mentions
-}
-
-const notifyMentionedUsers = async (mentions, meetingId, sender) => {
-  for (const username of mentions) {
-    try {
-      const user = await userRepo.findByUsername(username)
-      if (!user || user._id.toString() === sender.id) continue
-
-      await notificationService.createNotification({
-        recipient: user._id,
-        sender: sender.id,
-        type: "chat_mention",
-        title: "You were mentioned",
-        message: `${sender.name} mentioned you in a chat`,
-        link: `/meetings/${meetingId}`,
-      })
-    } catch (err) {
-      console.log("Mention notification error:", err.message)
-    }
-  }
-}
+const chatService = require("../services/chatService");
 
 const registerChatHandlers = (io, socket) => {
   socket.on("chat:send", async ({ meetingId, message }) => {
-    if (!meetingId || !message) return
+    if (!meetingId || !message) return;
 
     try {
       const { message: savedMessage } = await chatService.saveMessage(
         meetingId,
         socket.user.id,
         message
-      )
+      );
 
-      io.to(meetingId).emit("chat:message", {
-        id: savedMessage._id,
-        sender: {
-          userId: savedMessage.sender._id,
-          name: savedMessage.sender.name,
-          username: savedMessage.sender.username,
-          profilePicture: savedMessage.sender.profilePicture,
-        },
-        message: savedMessage.message,
-        meetingId,
-        timestamp: savedMessage.createdAt,
-      })
-
-      const mentions = extractMentions(message)
-      if (mentions.length > 0) {
-        await notifyMentionedUsers(mentions, meetingId, {
-          id: socket.user.id,
-          name: socket.user.name,
-        })
-      }
+      io.to(meetingId).emit("chat:message", savedMessage);
     } catch (error) {
-      socket.emit("chat:error", { message: error.message })
+      socket.emit("chat:error", { message: error.message });
     }
-  })
+  });
 
   socket.on("chat:typing", ({ meetingId, isTyping }) => {
-    if (!meetingId) return
+    if (!meetingId) return;
 
     socket.to(meetingId).emit("chat:user-typing", {
       userId: socket.user.id,
       username: socket.user.username,
       isTyping,
-    })
-  })
-}
+    });
+  });
 
-module.exports = { registerChatHandlers }
+  socket.on("chat:delete", async ({ meetingId, messageId }) => {
+    if (!meetingId || !messageId) return;
+
+    try {
+      const result = await chatService.deleteMessage(
+        messageId,
+        socket.user.id,
+        meetingId
+      );
+
+      io.to(meetingId).emit("chat:message-deleted", {
+        messageId: result.messageId,
+      });
+    } catch (error) {
+      socket.emit("chat:error", { message: error.message });
+    }
+  });
+};
+
+module.exports = { registerChatHandlers };
