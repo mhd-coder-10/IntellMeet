@@ -1,11 +1,11 @@
 // Defines chat API routes with Swagger documentation
-// Mounts under /api/chats with auth protection
+// Delete route accepts meetingId in body to verify host permission
 
-const express = require("express")
-const router = express.Router()
+const express = require("express");
+const router = express.Router();
 
-const { getMessages, deleteMessage } = require("../controllers/chatController")
-const { protect } = require("../middleware/auth.middleware")
+const { getMessages, deleteMessage } = require("../controllers/chatController");
+const { protect } = require("../middleware/auth.middleware");
 
 /**
  * @swagger
@@ -32,16 +32,14 @@ const { protect } = require("../middleware/auth.middleware")
  *     responses:
  *       200:
  *         description: List of messages with pagination
- *       404:
- *         description: Meeting not found
  */
-router.get("/:meetingId", protect, getMessages)
+router.get("/:meetingId", protect, getMessages);
 
 /**
  * @swagger
  * /chats/message/{messageId}:
  *   delete:
- *     summary: Delete a chat message (only sender)
+ *     summary: Delete a chat message (host only)
  *     tags: [Chat]
  *     parameters:
  *       - in: path
@@ -49,12 +47,22 @@ router.get("/:meetingId", protect, getMessages)
  *         required: true
  *         schema:
  *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [meetingId]
+ *             properties:
+ *               meetingId:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Message deleted
- *       404:
- *         description: Message not found or not authorized
+ *       403:
+ *         description: Only host can delete
  */
-router.delete("/message/:messageId", protect, deleteMessage)
+router.delete("/message/:messageId", protect, deleteMessage);
 
-module.exports = router
+module.exports = router;

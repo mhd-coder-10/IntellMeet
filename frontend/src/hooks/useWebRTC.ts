@@ -34,6 +34,7 @@ interface MeetingUser {
 
 export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const videoSendersRef = useRef<Map<string, RTCRtpSender>>(new Map());
   const currentUserId = useAuthStore((state) => state.user?.id);
 
   const {
@@ -66,7 +67,10 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       const pc = new RTCPeerConnection(ICE_SERVERS);
 
       stream.getTracks().forEach((track) => {
-        pc.addTrack(track, stream);
+        const sender = pc.addTrack(track, stream);
+        if (track.kind === "video") {
+          videoSendersRef.current.set(peerInfo.userId, sender);
+        }
       });
 
       pc.onicecandidate = (event) => {
@@ -143,12 +147,13 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       console.log('User joined:', data.name);
     });
 
-    socket.on('meeting:user-left', ({ userId }) => {
+    socket.on("meeting:user-left", ({ userId }) => {
       const pc = peerConnections.current.get(userId);
       if (pc) {
         pc.close();
         peerConnections.current.delete(userId);
       }
+      videoSendersRef.current.delete(userId);
       removePeer(userId);
     });
 
@@ -249,6 +254,41 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     setLocalStream(null);
   }, [localStream, setLocalStream]);
 
+  // Turn camera on/off by stopping or restarting the video track
+  const toggleVideo = useCallback(
+    async (enabled: boolean) => {
+      if (!localStream) return;
+
+      // Stop existing video tracks
+      localStream.getVideoTracks().forEach((track) => {
+        track.stop();
+        localStream.removeTrack(track);
+      });
+
+      if (enabled) {
+        try {
+          const newStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+          });
+          const newTrack = newStream.getVideoTracks()[0];
+          localStream.addTrack(newTrack);
+
+          videoSendersRef.current.forEach((sender) => {
+            sender.replaceTrack(newTrack);
+          });
+        } catch (error) {
+          console.error("Failed to start camera:", error);
+          throw error;
+        }
+      } else {
+        videoSendersRef.current.forEach((sender) => {
+          sender.replaceTrack(null);
+        });
+      }
+    },
+    [localStream]
+  );
+
   const closeAllPeers = useCallback(() => {
     peerConnections.current.forEach((pc) => pc.close());
     peerConnections.current.clear();
@@ -257,6 +297,7 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   return {
     startLocalStream,
     stopLocalStream,
+    toggleVideo,
     closeAllPeers,
     peerCount: peers.length,
   };

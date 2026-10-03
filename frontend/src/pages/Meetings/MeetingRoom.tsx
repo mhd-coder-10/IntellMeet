@@ -1,29 +1,29 @@
+// Main video call room with WebRTC integration and chat sidebar
+// Shows local and remote videos, chat panel and meeting controls
 
-// Main video call room with WebRTC integration
-// Shows local and remote videos, controls and participant count
-
-import { useQueryClient, useQuery } from '@tanstack/react-query';
-import { useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-import { Users, Loader2 } from 'lucide-react';
-import { useSocket } from '@/hooks/useSocket';
-import { useWebRTC } from '@/hooks/useWebRTC';
-import { useMeetingStore } from '@/store/meetingStore';
-import { useAuthStore } from '@/store/authStore';
-import {
-  getMeetingById,
-  joinMeeting,
-  leaveMeeting,
-  endMeeting,
-} from '@/services/meetingService';
-import { VideoTile } from '@/components/Meetings/VideoTile';
-import { MeetingControls } from '@/components/Meetings/MeetingControls';
+import { useQueryClient, useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { Users, Loader2, MessageSquare } from "lucide-react";
+import { useSocket } from "@/hooks/useSocket";
+import { useWebRTC } from "@/hooks/useWebRTC";
+import { useChat } from "@/hooks/useChat";
+import { useMeetingStore } from "@/store/meetingStore";
+import { useAuthStore } from "@/store/authStore";
+import {getMeetingById, joinMeeting, leaveMeeting, endMeeting,} from "@/services/meetingService";
+import { VideoTile } from "@/components/Meetings/VideoTile";
+import { MeetingControls } from "@/components/Meetings/MeetingControls";
+import { ChatPanel } from "@/components/Chat/ChatPanel";
+import { Button } from "@/components/ui/button";
 
 export default function MeetingRoom() {
+
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   const { socket, isConnected } = useSocket();
   const user = useAuthStore((state) => state.user);
@@ -37,18 +37,18 @@ export default function MeetingRoom() {
     resetMeeting,
   } = useMeetingStore();
 
+  // Chat state and helpers
+  const { messages, typingUsers, sendMessage, deleteMessage, sendTyping } = useChat(socket, id || null);
+
   const { data: meeting, isLoading } = useQuery({
-    queryKey: ['meeting', id],
+    queryKey: ["meeting", id],
     queryFn: () => getMeetingById(id!),
     enabled: !!id,
   });
 
   const isHost = meeting?.host._id === user?.id;
 
-  const { startLocalStream, stopLocalStream, closeAllPeers } = useWebRTC(
-    socket,
-    id || null
-  );
+  const { startLocalStream, stopLocalStream, closeAllPeers, toggleVideo  } = useWebRTC( socket, id || null);
 
   // Set current meeting id and call join API
   useEffect(() => {
@@ -61,12 +61,11 @@ export default function MeetingRoom() {
   useEffect(() => {
     if (!socket || !isConnected || !id) return;
 
-    socket.emit('meeting:join', { meetingId: id });
+    socket.emit("meeting:join", { meetingId: id });
 
-    // Send our initial media state after 1 second
     const timer = setTimeout(() => {
       const { isMuted, isVideoOn } = useMeetingStore.getState();
-      socket.emit('meeting:media-state', {
+      socket.emit("meeting:media-state", {
         meetingId: id,
         isMuted,
         isVideoOn,
@@ -80,7 +79,7 @@ export default function MeetingRoom() {
   useEffect(() => {
     if (socket && isConnected && id) {
       startLocalStream().catch(() => {
-        toast.error('Failed to access camera and microphone');
+        toast.error("Failed to access camera and microphone");
       });
     }
   }, [socket, isConnected, id, startLocalStream]);
@@ -94,19 +93,19 @@ export default function MeetingRoom() {
       message: string;
     }) => {
       if (data.meetingId === id) {
-        toast.error(data.message || 'Meeting has been ended by the host');
+        toast.error(data.message || "Meeting has been ended by the host");
         stopLocalStream();
         closeAllPeers();
         resetMeeting();
-        await queryClient.invalidateQueries({ queryKey: ['meetings'] });
-        navigate('/meetings');
+        await queryClient.invalidateQueries({ queryKey: ["meetings"] });
+        navigate("/meetings");
       }
     };
 
-    socket.on('meeting:ended', handleMeetingEnded);
+    socket.on("meeting:ended", handleMeetingEnded);
 
     return () => {
-      socket.off('meeting:ended', handleMeetingEnded);
+      socket.off("meeting:ended", handleMeetingEnded);
     };
   }, [
     socket,
@@ -121,10 +120,10 @@ export default function MeetingRoom() {
   const handleLeave = async () => {
     if (id) {
       try {
-        socket?.emit('meeting:leave', { meetingId: id });
+        socket?.emit("meeting:leave", { meetingId: id });
         await leaveMeeting(id);
       } catch (err) {
-        console.error('Leave error:', err);
+        console.error("Leave error:", err);
       }
     }
 
@@ -132,30 +131,28 @@ export default function MeetingRoom() {
     closeAllPeers();
     resetMeeting();
 
-    // Refresh meetings list so it appears immediately
-    await queryClient.invalidateQueries({ queryKey: ['meetings'] });
-    navigate('/meetings');
+    await queryClient.invalidateQueries({ queryKey: ["meetings"] });
+    navigate("/meetings");
   };
 
   const handleEndMeeting = async () => {
     if (!id) return;
 
     try {
-      socket?.emit('meeting:leave', { meetingId: id });
+      socket?.emit("meeting:leave", { meetingId: id });
       await endMeeting(id);
-      toast.success('Meeting ended');
+      toast.success("Meeting ended");
     } catch (err) {
-      console.error('End meeting error:', err);
-      toast.error('Failed to end meeting');
+      console.error("End meeting error:", err);
+      toast.error("Failed to end meeting");
     }
 
     stopLocalStream();
     closeAllPeers();
     resetMeeting();
 
-    // Refresh meetings list so host sees updated status
-    await queryClient.invalidateQueries({ queryKey: ['meetings'] });
-    navigate('/meetings');
+    await queryClient.invalidateQueries({ queryKey: ["meetings"] });
+    navigate("/meetings");
   };
 
   if (isLoading) {
@@ -170,46 +167,72 @@ export default function MeetingRoom() {
     <div className="min-h-screen bg-gray-900 flex flex-col">
       <div className="border-b border-gray-800 px-6 py-3 flex items-center justify-between text-white">
         <h1 className="text-lg font-semibold">{meeting?.title}</h1>
-        <div className="flex items-center gap-2 text-sm text-gray-400">
+
+        <div className="flex items-center gap-3 text-sm text-gray-400">
           <Users className="h-4 w-4" />
           <span>{peers.length + 1} in meeting</span>
-          <span className="ml-2 text-xs font-mono bg-gray-800 px-2 py-1 rounded">
+
+          <span className="text-xs font-mono bg-gray-800 px-2 py-1 rounded">
             {meeting?.meetingCode}
           </span>
+
+          <Button
+            variant={isChatOpen ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => setIsChatOpen((v) => !v)}
+            className="text-gray-300 hover:text-white"
+          >
+            <MessageSquare className="h-4 w-4 mr-1" />
+            Chat
+          </Button>
         </div>
       </div>
 
-      <div className="flex-1 p-4 overflow-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <VideoTile
-            stream={localStream}
-            name={user?.name || 'You'}
-            isMuted={isMuted}
-            isVideoOn={isVideoOn}
-            isLocal
-          />
-
-          {peers.map((peer) => (
+      <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 p-4 overflow-auto">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <VideoTile
-              key={peer.userId}
-              stream={peer.stream || null}
-              name={peer.name}
-              isMuted={peer.isMuted}
-              isVideoOn={peer.isVideoOn}
+              stream={localStream}
+              name={user?.name || "You"}
+              isMuted={isMuted}
+              isVideoOn={isVideoOn}
+              isLocal
             />
-          ))}
+
+            {peers.map((peer) => (
+              <VideoTile
+                key={peer.userId}
+                stream={peer.stream || null}
+                name={peer.name}
+                isMuted={peer.isMuted}
+                isVideoOn={peer.isVideoOn}
+              />
+            ))}
+          </div>
+
+          {peers.length === 0 && (
+            <div className="text-center text-gray-400 mt-8">
+              <p>Waiting for others to join...</p>
+              <p className="text-sm mt-2">
+                Share meeting code:{" "}
+                <span className="font-mono font-bold">
+                  {meeting?.meetingCode}
+                </span>
+              </p>
+            </div>
+          )}
         </div>
 
-        {peers.length === 0 && (
-          <div className="text-center text-gray-400 mt-8">
-            <p>Waiting for others to join...</p>
-            <p className="text-sm mt-2">
-              Share meeting code:{' '}
-              <span className="font-mono font-bold">
-                {meeting?.meetingCode}
-              </span>
-            </p>
-          </div>
+        {isChatOpen && (
+          <ChatPanel
+            messages={messages}
+            typingUsers={typingUsers}
+            isHost={isHost}
+            onSend={sendMessage}
+            onTyping={sendTyping}
+            onDelete={deleteMessage}
+            onClose={() => setIsChatOpen(false)}
+          />
         )}
       </div>
 
@@ -219,6 +242,7 @@ export default function MeetingRoom() {
         isHost={isHost}
         socket={socket}
         meetingId={id}
+        onToggleVideo={toggleVideo}
       />
     </div>
   );

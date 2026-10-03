@@ -76,11 +76,7 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    refreshToken: {
-      type: String,
-      default: null,
-      select: false,
-    },
+
     attendedMeetings: [
       {
         meeting: {
@@ -93,6 +89,19 @@ const userSchema = new mongoose.Schema(
         },
       },
     ],
+    
+    hiddenMeetings: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Meeting",
+      },
+    ],
+    refreshToken: {
+      type: String,
+      default: null,
+      select: false,
+    },
+
 
   }, { timestamps: true });
 

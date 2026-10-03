@@ -4,7 +4,7 @@ const User = require("../models/User");
 
 // User specific data access methods
 class UserRepository extends BaseRepository {
-    
+
     constructor() {
         super(User)
     }
@@ -57,6 +57,36 @@ class UserRepository extends BaseRepository {
             { profilePicture: "" },
             { new: true }
         )
+    }
+
+    // Add meeting to attendedMeetings without touching other fields
+    addAttendedMeeting(userId, meetingId) {
+        return User.findByIdAndUpdate(
+            userId,
+            {
+                $push: {
+                    attendedMeetings: { meeting: meetingId, leftAt: new Date() },
+                },
+            },
+            { new: true }
+        );
+    }
+
+    // Update leftAt if meeting already exists in attendedMeetings
+    updateAttendedMeeting(userId, meetingId) {
+        return User.updateOne(
+            { _id: userId, "attendedMeetings.meeting": meetingId },
+            { $set: { "attendedMeetings.$.leftAt": new Date() } }
+        );
+    }
+
+    // Add meeting to hiddenMeetings
+    addHiddenMeeting(userId, meetingId) {
+        return User.findByIdAndUpdate(
+            userId,
+            { $addToSet: { hiddenMeetings: meetingId } },
+            { new: true }
+        );
     }
 }
 

@@ -110,33 +110,47 @@ const getMeetingByCode = async (code) => {
 }
 
 const getUserMeetings = async (userId) => {
-  const Meeting = require("../models/Meeting")
-  const user = await userRepo.findById(userId)
+  const Meeting = require("../models/Meeting");
+  const user = await userRepo.findById(userId);
   if (!user) {
-    const error = new Error("User not found")
-    error.statusCode = 404
-    throw error
+    const error = new Error("User not found");
+    error.statusCode = 404;
+    throw error;
   }
 
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000)
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+  const attendedIds = (user.attendedMeetings || []).map((a) => a.meeting);
+  const hiddenIds = user.hiddenMeetings || [];
 
-  const recentAttendedIds = (user.attendedMeetings || [])
-    .filter((a) => a.leftAt > tenMinutesAgo)
-    .map((a) => a.meeting)
+  // Fetch all attended meetings to check status
+  const attendedMeetings = await Meeting.find({ _id: { $in: attendedIds } });
+
+  // Filter: completed ones always visible, active ones only within 10 min
+  const visibleAttendedIds = attendedMeetings
+    .filter((m) => {
+      if (m.status === "completed" || m.status === "cancelled") return true;
+
+      const record = user.attendedMeetings.find(
+        (a) => a.meeting.toString() === m._id.toString()
+      );
+      return record && record.leftAt > tenMinutesAgo;
+    })
+    .map((m) => m._id);
 
   const meetings = await Meeting.find({
     $or: [
       { host: userId },
       { participants: userId },
-      { _id: { $in: recentAttendedIds } },
+      { _id: { $in: visibleAttendedIds } },
     ],
+    _id: { $nin: hiddenIds },
   })
     .populate("host", "name username profilePicture")
     .populate("participants", "name username profilePicture")
-    .sort({ createdAt: -1 })
+    .sort({ createdAt: -1 });
 
-  return { meetings }
-}
+  return { meetings };
+};
 
 const updateMeeting = async (meetingId, userId, updateData) => {
   const meeting = await meetingRepo.findById(meetingId)
@@ -256,67 +270,68 @@ const joinMeeting = async (meetingId, userId) => {
   }
 }
 
-const leaveMeeting = async (meetingId, userId) => {
-  const meeting = await meetingRepo.findById(meetingId);
-  if (!meeting) {
-    const error = new Error("Meeting not found");
-    error.statusCode = 404;
-    throw error;
-  }
+// const leaveMeeting = async (meetingId, userId) => {
+//   const meeting = await meetingRepo.findById(meetingId);
 
-  if (meeting.host.toString() === userId.toString()) {
-    const error = new Error("Host cannot leave. Please end the meeting");
-    error.statusCode = 400;
-    throw error;
-  }
+//   if (!meeting) {
+//     const error = new Error("Meeting not found");
+//     error.statusCode = 404;
+//     throw error;
+//   }
 
-  const user = await userRepo.findById(userId);
+//   if (meeting.host.toString() === userId.toString()) {
+//     const error = new Error("Host cannot leave. Please end the meeting");
+//     error.statusCode = 400;
+//     throw error;
+//   }
 
-  await meetingRepo.removeParticipant(meetingId, userId);
-  await clearMeetingCaches(meetingId, userId);
+//   const user = await userRepo.findById(userId);
 
-  const roomManager = require("../webrtc/roomManager");
-  roomManager.removeUserFromRoom(meetingId, userId);
+//   await meetingRepo.removeParticipant(meetingId, userId);
+//   await clearMeetingCaches(meetingId, userId);
 
-  // Add to user's attended history
-  if (user) {
-    const existing = user.attendedMeetings.find(
-      (a) => a.meeting.toString() === meetingId.toString()
-    );
-    if (existing) {
-      existing.leftAt = new Date();
-    } else {
-      user.attendedMeetings.push({
-        meeting: meetingId,
-        leftAt: new Date(),
-      });
-    }
-    await user.save({ validateBeforeSave: false });
-  }
+//   const roomManager = require("../webrtc/roomManager");
+//   roomManager.removeUserFromRoom(meetingId, userId);
 
-  try {
-    await notificationService.createNotification({
-      recipient: meeting.host,
-      sender: userId,
-      type: "system",
-      title: "Participant Left",
-      message: `${user?.name || "A user"} left your meeting "${meeting.title}"`,
-      link: `/meetings/${meetingId}`,
-    });
-  } catch (err) {
-    console.log("Leave notification error:", err.message);
-  }
+//   // Add to user's attended history
+//   if (user) {
+//     const existing = user.attendedMeetings.find(
+//       (a) => a.meeting.toString() === meetingId.toString()
+//     );
+//     if (existing) {
+//       existing.leftAt = new Date();
+//     } else {
+//       user.attendedMeetings.push({
+//         meeting: meetingId,
+//         leftAt: new Date(),
+//       });
+//     }
+//     await user.save({ validateBeforeSave: false });
+//   }
 
-  return {
-    message: "Left meeting successfully",
-    meetingId,
-    userLeft: {
-      userId: userId,
-      name: user?.name || "A user",
-      username: user?.username || "unknown",
-    },
-  };
-};
+//   try {
+//     await notificationService.createNotification({
+//       recipient: meeting.host,
+//       sender: userId,
+//       type: "system",
+//       title: "Participant Left",
+//       message: `${user?.name || "A user"} left your meeting "${meeting.title}"`,
+//       link: `/meetings/${meetingId}`,
+//     });
+//   } catch (err) {
+//     console.log("Leave notification error:", err.message);
+//   }
+
+//   return {
+//     message: "Left meeting successfully",
+//     meetingId,
+//     userLeft: {
+//       userId: userId,
+//       name: user?.name || "A user",
+//       username: user?.username || "unknown",
+//     },
+//   };
+// };
 
 const startMeeting = async (meetingId, userId) => {
   const meeting = await meetingRepo.findById(meetingId)
@@ -350,26 +365,164 @@ const startMeeting = async (meetingId, userId) => {
   return { meeting: updated }
 }
 
-const endMeeting = async (meetingId, userId) => {
-  const meeting = await meetingRepo.findById(meetingId)
+const leaveMeeting = async (meetingId, userId) => {
+  const meeting = await meetingRepo.findById(meetingId);
   if (!meeting) {
-    const error = new Error("Meeting not found")
-    error.statusCode = 404
-    throw error
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (meeting.host.toString() === userId.toString()) {
+    const error = new Error("Host cannot leave. Please end the meeting");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const user = await userRepo.findById(userId);
+
+  await meetingRepo.removeParticipant(meetingId, userId);
+  await clearMeetingCaches(meetingId, userId);
+
+  const roomManager = require("../webrtc/roomManager");
+  roomManager.removeUserFromRoom(meetingId, userId);
+
+  // Use $push / updateOne to avoid touching refreshToken
+  if (user) {
+    const exists = user.attendedMeetings.find(
+      (a) => a.meeting.toString() === meetingId.toString()
+    );
+
+    if (exists) {
+      await userRepo.updateAttendedMeeting(userId, meetingId);
+    } else {
+      await userRepo.addAttendedMeeting(userId, meetingId);
+    }
+  }
+
+  try {
+    await notificationService.createNotification({
+      recipient: meeting.host,
+      sender: userId,
+      type: "system",
+      title: "Participant Left",
+      message: `${user?.name || "A user"} left your meeting "${meeting.title}"`,
+      link: `/meetings/${meetingId}`,
+    });
+  } catch (err) {
+    console.log("Leave notification error:", err.message);
+  }
+
+  return {
+    message: "Left meeting successfully",
+    meetingId,
+    userLeft: {
+      userId: userId,
+      name: user?.name || "A user",
+      username: user?.username || "unknown",
+    },
+  };
+};
+
+
+// const endMeeting = async (meetingId, userId) => {
+//   const meeting = await meetingRepo.findById(meetingId);
+//   if (!meeting) {
+//     const error = new Error("Meeting not found");
+//     error.statusCode = 404;
+//     throw error;
+//   }
+
+//   if (meeting.host.toString() !== userId.toString()) {
+//     const error = new Error("Only host can end the meeting");
+//     error.statusCode = 403;
+//     throw error;
+//   }
+
+//   const now = new Date();
+
+//   // Add host + all participants to attendedMeetings permanently
+//   const allUserIds = [meeting.host, ...meeting.participants];
+
+//   for (const uid of allUserIds) {
+//     const user = await userRepo.findById(uid);
+//     if (!user) continue;
+
+//     const exists = user.attendedMeetings.find(
+//       (a) => a.meeting.toString() === meetingId.toString()
+//     );
+
+//     if (!exists) {
+//       user.attendedMeetings.push({ meeting: meetingId, leftAt: now });
+//       await user.save({ validateBeforeSave: false });
+//     }
+//   }
+
+//   const updated = await meetingRepo.updateById(meetingId, {
+//     status: "completed",
+//     endedAt: now,
+//   });
+
+//   await clearMeetingCaches(meetingId, userId);
+
+//   await notifyParticipants(
+//     updated,
+//     userId,
+//     "meeting_ended",
+//     "Meeting Ended",
+//     `${updated.title} has been ended by the host`
+//   );
+
+//   roomManager.clearRoom(meetingId);
+
+//   const chatRepo = require("../repositories/chatRepository");
+//   await chatRepo.deleteAllByMeeting(meetingId);
+
+//   return { meeting: updated, meetingId };
+// };
+
+
+
+const endMeeting = async (meetingId, userId) => {
+  const meeting = await meetingRepo.findById(meetingId);
+  if (!meeting) {
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
   }
 
   if (meeting.host.toString() !== userId.toString()) {
-    const error = new Error("Only host can end the meeting")
-    error.statusCode = 403
-    throw error
+    const error = new Error("Only host can end the meeting");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const now = new Date();
+
+  // Add host + all participants to attendedMeetings using $push
+  const allUserIds = [meeting.host, ...meeting.participants];
+
+  for (const uid of allUserIds) {
+    const u = await userRepo.findById(uid);
+    if (!u) continue;
+
+    const exists = u.attendedMeetings.find(
+      (a) => a.meeting.toString() === meetingId.toString()
+    );
+
+    if (exists) {
+      await userRepo.updateAttendedMeeting(uid, meetingId);
+    } else {
+      await userRepo.addAttendedMeeting(uid, meetingId);
+    }
   }
 
   const updated = await meetingRepo.updateById(meetingId, {
     status: "completed",
-    endedAt: new Date(),
-  })
+    endedAt: now,
+  });
 
-  await clearMeetingCaches(meetingId, userId)
+  await clearMeetingCaches(meetingId, userId);
 
   await notifyParticipants(
     updated,
@@ -377,29 +530,51 @@ const endMeeting = async (meetingId, userId) => {
     "meeting_ended",
     "Meeting Ended",
     `${updated.title} has been ended by the host`
-  )
+  );
 
   roomManager.clearRoom(meetingId);
 
-  return { meeting: updated, meetingId }
-}
+  const chatRepo = require("../repositories/chatRepository");
+  await chatRepo.deleteAllByMeeting(meetingId);
 
-// Remove meeting from user's attended history (hides from their list)
+  return { meeting: updated, meetingId };
+};
+
+// Remove meeting from user's visible list (hides it for this user only)
+// const hideMeetingFromUser = async (meetingId, userId) => {
+//   const user = await userRepo.findById(userId);
+//   if (!user) {
+//     const error = new Error("User not found");
+//     error.statusCode = 404;
+//     throw error;
+//   }
+
+//   const alreadyHidden = user.hiddenMeetings.some(
+//     (m) => m.toString() === meetingId.toString()
+//   );
+
+//   if (!alreadyHidden) {
+//     user.hiddenMeetings.push(meetingId);
+//     await user.save({ validateBeforeSave: false });
+//   }
+
+//   return { message: "Meeting removed from your list" };
+// };
+
+
 const hideMeetingFromUser = async (meetingId, userId) => {
-  const user = await userRepo.findById(userId)
+  const user = await userRepo.findById(userId);
   if (!user) {
-    const error = new Error("User not found")
-    error.statusCode = 404
-    throw error
+    const error = new Error("User not found");
+    error.statusCode = 404;
+    throw error;
   }
 
-  user.attendedMeetings = user.attendedMeetings.filter(
-    (a) => a.meeting.toString() !== meetingId.toString()
-  )
-  await user.save({ validateBeforeSave: false })
+  // Use $addToSet - avoids duplicate, doesn't touch other fields
+  await userRepo.addHiddenMeeting(userId, meetingId);
 
-  return { message: "Meeting removed from your list" }
-}
+  return { message: "Meeting removed from your list" };
+};
 
 module.exports = {
   createMeeting,

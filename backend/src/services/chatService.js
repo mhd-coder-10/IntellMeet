@@ -1,21 +1,22 @@
 // Contains chat business logic for saving and fetching messages
-// Supports paginated chat history retrieval
+// Host can delete any message; meeting end deletes all messages
 
-const chatRepo = require("../repositories/chatRepository")
-const meetingRepo = require("../repositories/meetingRepository")
+const chatRepo = require("../repositories/chatRepository");
+const meetingRepo = require("../repositories/meetingRepository");
 
+// Save a new chat message and return the populated document
 const saveMessage = async (meetingId, userId, message) => {
   if (!message || !message.trim()) {
-    const error = new Error("Message cannot be empty")
-    error.statusCode = 400
-    throw error
+    const error = new Error("Message cannot be empty");
+    error.statusCode = 400;
+    throw error;
   }
 
-  const meeting = await meetingRepo.findById(meetingId)
+  const meeting = await meetingRepo.findById(meetingId);
   if (!meeting) {
-    const error = new Error("Meeting not found")
-    error.statusCode = 404
-    throw error
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
   }
 
   const savedMessage = await chatRepo.createMessage({
@@ -23,25 +24,25 @@ const saveMessage = async (meetingId, userId, message) => {
     sender: userId,
     message: message.trim(),
     type: "text",
-  })
+  });
 
-  const populated = await chatRepo.findById(savedMessage._id)
-  await populated.populate("sender", "name username profilePicture")
+  await savedMessage.populate("sender", "name username profilePicture");
 
-  return { message: populated }
-}
+  return { message: savedMessage };
+};
 
+// Get paginated messages for a meeting
 const getMeetingMessages = async (meetingId, limit = 50, page = 1) => {
-  const meeting = await meetingRepo.findById(meetingId)
+  const meeting = await meetingRepo.findById(meetingId);
   if (!meeting) {
-    const error = new Error("Meeting not found")
-    error.statusCode = 404
-    throw error
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
   }
 
-  const skip = (page - 1) * limit
-  const messages = await chatRepo.findByMeeting(meetingId, limit, skip)
-  const total = await chatRepo.countByMeeting(meetingId)
+  const skip = (page - 1) * limit;
+  const messages = await chatRepo.findByMeeting(meetingId, limit, skip);
+  const total = await chatRepo.countByMeeting(meetingId);
 
   return {
     messages,
@@ -52,17 +53,35 @@ const getMeetingMessages = async (meetingId, limit = 50, page = 1) => {
       totalPages: Math.ceil(total / limit),
       hasMore: skip + messages.length < total,
     },
-  }
-}
+  };
+};
 
-const deleteMessage = async (messageId, userId) => {
-  const message = await chatRepo.softDelete(messageId, userId)
+// Delete a message - only the host of the meeting can delete
+const deleteMessage = async (messageId, userId, meetingId) => {
+  const meeting = await meetingRepo.findById(meetingId);
+  if (!meeting) {
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // Only the host has moderation rights
+  if (meeting.host.toString() !== userId.toString()) {
+    const error = new Error("Only the host can delete messages");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const message = await chatRepo.findById(messageId);
   if (!message) {
-    const error = new Error("Message not found or not authorized")
-    error.statusCode = 404
-    throw error
+    const error = new Error("Message not found");
+    error.statusCode = 404;
+    throw error;
   }
-  return { message: "Message deleted successfully" }
-}
 
-module.exports = { saveMessage, getMeetingMessages, deleteMessage }
+  await chatRepo.hardDeleteById(messageId);
+
+  return { message: "Message deleted successfully", messageId };
+};
+
+module.exports = { saveMessage, getMeetingMessages, deleteMessage };
