@@ -17,9 +17,11 @@ const {
   startMeeting,
   endMeeting,
   hideMeeting,
+  uploadMeetingRecording,
 } = require("../controllers/meetingController")
 
 const { protect } = require("../middleware/auth.middleware")
+const { uploadRecording } = require("../middleware/upload.middleware")
 
 /**
  * @swagger
@@ -261,5 +263,8 @@ router.post("/:id/start", protect, startMeeting);
  *         description: Only host can end
  */
 router.post("/:id/end", protect, endMeeting);
+
+// Upload and save meeting recording
+router.post("/:id/recording", protect, uploadRecording.single("recording"), uploadMeetingRecording);
 
 module.exports = router

@@ -50,3 +50,23 @@ export const endMeeting = async (id: string): Promise<Meeting> => {
 export const deleteMeeting = async (id: string): Promise<void> => {
     await api.delete(`/meetings/${id}`)
 }
+
+export const uploadMeetingRecording = async (
+    id: string,
+    blobOrFormData: Blob | FormData | { recordingUrl: string }
+): Promise<{ meeting: Meeting; recordingUrl: string }> => {
+    let payload: FormData | { recordingUrl: string };
+
+    if (blobOrFormData instanceof Blob) {
+        const fd = new FormData();
+        fd.append("recording", blobOrFormData, `recording-${id}-${Date.now()}.webm`);
+        payload = fd;
+    } else {
+        payload = blobOrFormData;
+    }
+
+    const response = await api.post(`/meetings/${id}/recording`, payload, {
+        headers: payload instanceof FormData ? { "Content-Type": "multipart/form-data" } : undefined,
+    });
+    return response.data.data;
+};

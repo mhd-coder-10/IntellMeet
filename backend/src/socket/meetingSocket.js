@@ -1,53 +1,53 @@
 
-// Handles meeting room events with full DB and socket sync
-// Adds participant to DB when joining via socket
+// Handles meeting room events like join, leave and media state
+// Also handles screen sharing and recording broadcasts
 
-const roomManager = require("../webrtc/roomManager")
-const meetingRepo = require("../repositories/meetingRepository")
-const notificationService = require("../services/notificationService")
+const roomManager = require("../webrtc/roomManager");
+const notificationService = require("../services/notificationService");
 
 const registerMeetingHandlers = (io, socket) => {
 
+  // Handle user joining a meeting
   socket.on("meeting:join", async ({ meetingId }) => {
-    if (!meetingId) return
+    if (!meetingId) return;
 
     try {
-      const meeting = await meetingRepo.findById(meetingId)
+      const meetingRepo = require("../repositories/meetingRepository");
+      const meeting = await meetingRepo.findById(meetingId);
 
       if (!meeting) {
-        socket.emit("meeting:error", { message: "Meeting not found" })
-        return
+        socket.emit("meeting:error", { message: "Meeting not found" });
+        return;
       }
 
       if (meeting.status === "completed" || meeting.status === "cancelled") {
         socket.emit("meeting:error", {
           message: "This meeting is no longer active",
-        })
-        return
+        });
+        return;
       }
 
-      socket.join(meetingId)
-      socket.meetingId = meetingId
+      socket.join(meetingId);
+      socket.meetingId = meetingId;
 
       const userInfo = {
         name: socket.user.name,
         username: socket.user.username,
         profilePicture: socket.user.profilePicture,
-      }
+      };
 
-      roomManager.addUserToRoom(meetingId, socket.user.id, socket.id, userInfo)
+      roomManager.addUserToRoom(meetingId, socket.user.id, socket.id, userInfo);
 
-      // Add to DB participants if not host and not already in
-      const isHost = meeting.host.toString() === socket.user.id
+      const isHost = meeting.host.toString() === socket.user.id;
       const alreadyParticipant = meeting.participants.some(
         (p) => p.toString() === socket.user.id
-      )
+      );
 
       if (!isHost && !alreadyParticipant) {
-        await meetingRepo.addParticipant(meetingId, socket.user.id)
+        await meetingRepo.addParticipant(meetingId, socket.user.id);
       }
 
-      const users = roomManager.getRoomUsers(meetingId)
+      const users = roomManager.getRoomUsers(meetingId);
 
       io.to(meetingId).emit("meeting:user-joined", {
         userId: socket.user.id,
@@ -55,10 +55,14 @@ const registerMeetingHandlers = (io, socket) => {
         name: socket.user.name,
         profilePicture: socket.user.profilePicture,
         totalUsers: users.length,
-      })
+      });
 
+      const recordingUserId = roomManager.getRecordingUser(meetingId);
       socket.emit("meeting:joined", {
         meetingId,
+        screenSharingUserId: roomManager.getScreenSharingUser(meetingId),
+        recordingUserId,
+        isRecording: !!recordingUserId,
         users: users.map((u) => ({
           userId: u.userId,
           name: u.name,
@@ -67,9 +71,8 @@ const registerMeetingHandlers = (io, socket) => {
           isMuted: u.isMuted,
           isVideoOn: u.isVideoOn,
         })),
-      })
+      });
 
-      // Notify host if not host
       if (!isHost) {
         try {
           await notificationService.createNotification({
@@ -79,25 +82,27 @@ const registerMeetingHandlers = (io, socket) => {
             title: "Participant Joined",
             message: `${socket.user.name} joined your meeting "${meeting.title}"`,
             link: `/meetings/${meetingId}`,
-          })
+          });
         } catch (err) {
-          console.log("Notification error:", err.message)
+          console.log("Notification error:", err.message);
         }
       }
     } catch (err) {
-      console.log("Meeting join error:", err.message)
-      socket.emit("meeting:error", { message: "Failed to join meeting" })
+      console.log("Meeting join error:", err.message);
+      socket.emit("meeting:error", { message: "Failed to join meeting" });
     }
-  })
+  });
 
+  // Handle user leaving a meeting
   socket.on("meeting:leave", async ({ meetingId }) => {
-    if (!meetingId) return
+    if (!meetingId) return;
 
     try {
-      const meeting = await meetingRepo.findById(meetingId)
+      const meetingRepo = require("../repositories/meetingRepository");
+      const meeting = await meetingRepo.findById(meetingId);
 
       if (meeting && meeting.host.toString() !== socket.user.id) {
-        await meetingRepo.removeParticipant(meetingId, socket.user.id)
+        await meetingRepo.removeParticipant(meetingId, socket.user.id);
 
         try {
           await notificationService.createNotification({
@@ -107,81 +112,98 @@ const registerMeetingHandlers = (io, socket) => {
             title: "Participant Left",
             message: `${socket.user.name} left your meeting "${meeting.title}"`,
             link: `/meetings/${meetingId}`,
-          })
+          });
         } catch (err) {
-          console.log("Leave notification error:", err.message)
+          console.log("Leave notification error:", err.message);
         }
       }
 
-      socket.leave(meetingId)
-      roomManager.removeUserFromRoom(meetingId, socket.user.id)
-      socket.meetingId = null
+      socket.leave(meetingId);
+      roomManager.removeUserFromRoom(meetingId, socket.user.id);
+      socket.meetingId = null;
 
       io.to(meetingId).emit("meeting:user-left", {
         userId: socket.user.id,
         name: socket.user.name,
         username: socket.user.username,
-      })
+      });
     } catch (err) {
-      console.log("Meeting leave error:", err.message)
+      console.log("Meeting leave error:", err.message);
     }
-  })
+  });
 
-  socket.on(
-    "meeting:media-state",
-    ({ meetingId, isMuted, isVideoOn, isScreenSharing }) => {
-      if (!meetingId) return
+  // Handle media state changes (mute/unmute, video on/off)
+  socket.on("meeting:media-state", ({ meetingId, isMuted, isVideoOn }) => {
+    if (!meetingId) return;
 
-      const updated = roomManager.updateUserMediaState(
-        meetingId,
-        socket.user.id,
-        { isMuted, isVideoOn, isScreenSharing }
-      )
+    const updated = roomManager.updateUserMediaState(meetingId, socket.user.id, {
+      isMuted,
+      isVideoOn,
+    });
 
-      if (updated) {
-        io.to(meetingId).emit("meeting:media-state-changed", {
-          userId: socket.user.id,
-          isMuted: updated.isMuted,
-          isVideoOn: updated.isVideoOn,
-          isScreenSharing: updated.isScreenSharing,
-        })
-      }
+    if (updated) {
+      io.to(meetingId).emit("meeting:media-state-changed", {
+        userId: socket.user.id,
+        isMuted: updated.isMuted,
+        isVideoOn: updated.isVideoOn,
+      });
     }
-  )
+  });
 
-  // socket.on("disconnect", async () => {
-  //   const meetingId = socket.meetingId
+  // Broadcast screen share start to other participants
+  socket.on("meeting:screen-share-started", ({ meetingId }) => {
+    if (!meetingId) return;
+    roomManager.setScreenSharingUser(meetingId, socket.user.id);
 
-  //   if (meetingId) {
-  //     try {
-  //       const meeting = await meetingRepo.findById(meetingId)
+    socket.to(meetingId).emit("meeting:screen-share-started", {
+      userId: socket.user.id,
+      username: socket.user.username,
+      name: socket.user.name,
+    });
+  });
 
-  //       if (meeting && meeting.host.toString() !== socket.user.id) {
-  //         await meetingRepo.removeParticipant(meetingId, socket.user.id)
-  //       }
-  //     } catch (err) {
-  //       console.log("Disconnect cleanup error:", err.message)
-  //     }
+  // Broadcast screen share stop to other participants
+  socket.on("meeting:screen-share-stopped", ({ meetingId }) => {
+    if (!meetingId) return;
+    roomManager.clearScreenSharingUser(meetingId);
 
-  //     roomManager.removeUserFromRoom(meetingId, socket.user.id)
+    socket.to(meetingId).emit("meeting:screen-share-stopped", {
+      userId: socket.user.id,
+    });
+  });
 
-  //     io.to(meetingId).emit("meeting:user-left", {
-  //       userId: socket.user.id,
-  //       name: socket.user.name,
-  //       username: socket.user.username,
-  //     })
-  //   }
-  // })
+  // Broadcast recording start to participants
+  socket.on("meeting:recording-started", ({ meetingId }) => {
+    if (!meetingId) return;
+    roomManager.setRecordingUser(meetingId, socket.user.id);
 
+    socket.to(meetingId).emit("meeting:recording-started", {
+      userId: socket.user.id,
+      name: socket.user.name,
+    });
+  });
+
+  // Broadcast recording stop to participants
+  socket.on("meeting:recording-stopped", ({ meetingId }) => {
+    if (!meetingId) return;
+    roomManager.clearRecordingUser(meetingId);
+    
+    socket.to(meetingId).emit("meeting:recording-stopped", {
+      userId: socket.user.id,
+    });
+  });
+
+  // Meeting disconnect handler to clean up DB and notify host
   socket.on("disconnect", async () => {
-    const meetingId = socket.meetingId
+    const meetingId = socket.meetingId;
 
     if (meetingId) {
       try {
-        const meeting = await meetingRepo.findById(meetingId)
+        const meetingRepo = require("../repositories/meetingRepository");
+        const meeting = await meetingRepo.findById(meetingId);
 
         if (meeting && meeting.host.toString() !== socket.user.id) {
-          await meetingRepo.removeParticipant(meetingId, socket.user.id)
+          await meetingRepo.removeParticipant(meetingId, socket.user.id);
 
           try {
             await notificationService.createNotification({
@@ -191,26 +213,24 @@ const registerMeetingHandlers = (io, socket) => {
               title: "Participant Left",
               message: `${socket.user.name} left your meeting "${meeting.title}"`,
               link: `/meetings/${meetingId}`,
-            })
+            });
           } catch (err) {
-            console.log("Disconnect notification error:", err.message)
+            console.log("Disconnect notification error:", err.message);
           }
         }
       } catch (err) {
-        console.log("Disconnect cleanup error:", err.message)
+        console.log("Disconnect cleanup error:", err.message);
       }
 
-      roomManager.removeUserFromRoom(meetingId, socket.user.id)
+      roomManager.removeUserFromRoom(meetingId, socket.user.id);
 
       io.to(meetingId).emit("meeting:user-left", {
         userId: socket.user.id,
         name: socket.user.name,
         username: socket.user.username,
-      })
+      });
     }
-  })
+  });
+};
 
-
-}
-
-module.exports = { registerMeetingHandlers }
+module.exports = { registerMeetingHandlers };

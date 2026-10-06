@@ -79,9 +79,13 @@ const deleteMessage = async (messageId, userId, meetingId) => {
     throw error;
   }
 
-  await chatRepo.hardDeleteById(messageId);
+  await chatRepo.updateById(messageId, {
+    isDeleted: true,
+    deletedBy: "host",
+    message: "Message was deleted by host",
+  });
 
-  return { message: "Message deleted successfully", messageId };
+  return { message: "Message deleted successfully", messageId, deletedBy: "host" };
 };
 
 module.exports = { saveMessage, getMeetingMessages, deleteMessage };

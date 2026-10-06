@@ -64,6 +64,18 @@ const meetingSchema = new mongoose.Schema(
             type: String,
             default: "",
         },
+        recordingDeletedByHost: {
+            type: Boolean,
+            default: false,
+        },
+        isHostDeleted: {
+            type: Boolean,
+            default: false,
+        },
+        hostDeletedAt: {
+            type: Date,
+            default: null,
+        },
         settings: {
             allowChat: { type: Boolean, default: true },
             allowScreenShare: { type: Boolean, default: true },

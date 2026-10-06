@@ -1,42 +1,6 @@
 
 const userRepo = require("../repositories/userRepository")
-const cloudinary = require("../config/cloudinary")
-
-// Extract cloudinary public id from secure url
-const extractPublicId = (url) => {
-  const parts = url.split("/")
-  const filename = parts[parts.length - 1]
-  const folder = parts[parts.length - 2]
-  return `${folder}/${filename.split(".")[0]}`
-}
-
-// Upload buffer to cloudinary and return result
-const uploadToCloudinary = (buffer) => {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        folder: process.env.CLOUDINARY_FOLDER || "intellimeet/avatars",
-        resource_type: "image",
-      },
-      (error, result) => {
-        if (error) reject(error)
-        else resolve(result)
-      }
-    )
-    stream.end(buffer)
-  })
-}
-
-// Delete image from cloudinary using url
-const deleteFromCloudinary = async (url) => {
-  if (!url) return
-  try {
-    const publicId = extractPublicId(url)
-    await cloudinary.uploader.destroy(publicId)
-  } catch (err) {
-    console.log("Cloudinary delete failed:", err.message)
-  }
-}
+const { deleteMediaFile, uploadToCloudinary } = require("../utils/mediaStorage");
 
 // Get logged in user profile
 const getProfile = async (userId) => {
@@ -94,13 +58,13 @@ const updateAvatar = async (userId, fileBuffer) => {
     throw error
   }
 
-  // Delete old avatar from cloudinary
+  // Delete old avatar from Cloudinary or disk
   if (user.profilePicture) {
-    await deleteFromCloudinary(user.profilePicture)
+    await deleteMediaFile(user.profilePicture);
   }
 
   // Upload new avatar
-  const result = await uploadToCloudinary(fileBuffer)
+  const result = await uploadToCloudinary(fileBuffer, { subfolder: "avatars", resource_type: "image" });
 
   const updated = await userRepo.updateAvatar(userId, result.secure_url)
 
@@ -110,6 +74,7 @@ const updateAvatar = async (userId, fileBuffer) => {
       name: updated.name,
       username: updated.username,
       email: updated.email,
+      bio: updated.bio || "",
       profilePicture: updated.profilePicture,
       role: updated.role,
     },
@@ -131,8 +96,8 @@ const removeAvatar = async (userId) => {
     throw error
   }
 
-  // Delete from cloudinary
-  await deleteFromCloudinary(user.profilePicture)
+  // Delete avatar from Cloudinary or disk
+  await deleteMediaFile(user.profilePicture);
 
   // Clear from database
   const updated = await userRepo.removeAvatar(userId)
@@ -143,6 +108,7 @@ const removeAvatar = async (userId) => {
       name: updated.name,
       username: updated.username,
       email: updated.email,
+      bio: updated.bio || "",
       profilePicture: updated.profilePicture,
       role: updated.role,
     },

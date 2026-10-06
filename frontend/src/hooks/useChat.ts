@@ -37,8 +37,14 @@ export function useChat(socket: Socket | null, meetingId: string | null) {
             addMessage(message);
         };
 
-        const handleDelete = ({ messageId }: { messageId: string }) => {
-            removeMessage(messageId);
+        const handleDelete = ({
+            messageId,
+            deletedBy,
+        }: {
+            messageId: string;
+            deletedBy?: string;
+        }) => {
+            removeMessage(messageId, deletedBy || "host");
         };
 
         const handleTyping = ({

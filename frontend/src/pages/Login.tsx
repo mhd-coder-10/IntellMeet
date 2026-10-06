@@ -1,10 +1,8 @@
-// Login page layout with gradient background
-// Wraps the LoginForm in a centered card
-
 import { Navigate } from 'react-router-dom'
 import { LoginForm } from '@/components/Auth/LoginForm'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { useAuthStore } from '@/store/authStore'
+import { Video } from 'lucide-react'
 
 export default function Login() {
     const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -14,15 +12,29 @@ export default function Login() {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center p-4">
-            <Card className="w-full max-w-md">
-                <CardHeader>
-                    <CardTitle className="text-2xl text-center">Welcome Back</CardTitle>
-                    <p className="text-center text-sm text-gray-600">
-                        Login to your IntelliMeet account
-                    </p>
+        <div className="min-h-screen bg-[#f8fafc] flex flex-col justify-center items-center p-4 antialiased selection:bg-blue-100">
+            <div className="mb-6 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-xs">
+                    <Video className="w-5 h-5" />
+                </div>
+                <div className="flex flex-col">
+                    <span className="text-xl font-bold tracking-tight text-slate-900 leading-tight">
+                        Intelli<span className="text-blue-600">Meet</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium tracking-wide">
+                        Enterprise Video Collaboration
+                    </span>
+                </div>
+            </div>
+
+            <Card className="w-full max-w-md border-slate-200/90 bg-white text-slate-900 shadow-sm rounded-2xl overflow-hidden">
+                <CardHeader className="text-center pb-4 pt-6 px-6 sm:px-8 border-b border-slate-100 bg-slate-50/70">
+                    <CardTitle className="text-xl font-bold text-slate-900 tracking-tight">Welcome Back</CardTitle>
+                    <CardDescription className="text-xs text-slate-600 mt-1">
+                        Sign in to your IntelliMeet workspace account
+                    </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-6 sm:p-8">
                     <LoginForm />
                 </CardContent>
             </Card>
