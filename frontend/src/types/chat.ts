@@ -15,6 +15,7 @@ export interface ChatMessage {
   message: string;
   type: "text" | "system";
   isDeleted: boolean;
+  deletedBy?: string;
   createdAt: string;
   updatedAt: string;
 }

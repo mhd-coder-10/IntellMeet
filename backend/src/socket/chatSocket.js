@@ -42,6 +42,7 @@ const registerChatHandlers = (io, socket) => {
 
       io.to(meetingId).emit("chat:message-deleted", {
         messageId: result.messageId,
+        deletedBy: "host",
       });
     } catch (error) {
       socket.emit("chat:error", { message: error.message });

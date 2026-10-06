@@ -24,7 +24,7 @@ const createMeeting = async (req, res) => {
 // Get meeting by ID
 const getMeetingById = async (req, res) => {
     try {
-        const data = await meetingService.getMeetingById(req.params.id)
+        const data = await meetingService.getMeetingById(req.params.id, req.user?.id)
         res.status(200).json({ success: true, data })
     } catch (error) {
         res.status(error.statusCode || 500).json({
@@ -225,6 +225,29 @@ const hideMeeting = async (req, res) => {
     }
 }
 
+const uploadMeetingRecording = async (req, res) => {
+    try {
+        const recordingUrl = req.body.recordingUrl;
+        const file = req.file;
+        const data = await meetingService.uploadMeetingRecording(
+            req.params.id,
+            req.user.id,
+            file,
+            recordingUrl
+        );
+        res.status(200).json({
+            success: true,
+            message: "Recording uploaded and saved successfully",
+            data,
+        });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+}
+
 module.exports = {
     createMeeting,
     getMeetingById,
@@ -237,4 +260,5 @@ module.exports = {
     startMeeting,
     endMeeting,
     hideMeeting,
+    uploadMeetingRecording,
 }

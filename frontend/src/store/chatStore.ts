@@ -9,7 +9,7 @@ interface ChatState {
     typingUsers: Record<string, string>;
     setMessages: (messages: ChatMessage[]) => void;
     addMessage: (message: ChatMessage) => void;
-    removeMessage: (messageId: string) => void;
+    removeMessage: (messageId: string, deletedBy?: string) => void;
     setTyping: (userId: string, username: string, isTyping: boolean) => void;
     clearChat: () => void;
 }
@@ -27,9 +27,18 @@ export const useChatStore = create<ChatState>((set) => ({
             return { messages: [...state.messages, message] };
         }),
 
-    removeMessage: (messageId) =>
+    removeMessage: (messageId, deletedBy = "host") =>
         set((state) => ({
-            messages: state.messages.filter((m) => m._id !== messageId),
+            messages: state.messages.map((m) =>
+                m._id === messageId
+                    ? {
+                        ...m,
+                        isDeleted: true,
+                        deletedBy: deletedBy || "host",
+                        message: "Message was deleted by host",
+                      }
+                    : m
+            ),
         })),
 
     setTyping: (userId, username, isTyping) =>

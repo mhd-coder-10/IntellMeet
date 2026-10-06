@@ -5,6 +5,7 @@ const meetingRepo = require("../repositories/meetingRepository");
 const userRepo = require("../repositories/userRepository");
 const notificationService = require("./notificationService");
 const roomManager = require("../webrtc/roomManager");
+const { deleteMediaFile, uploadToCloudinary } = require("../utils/mediaStorage");
 
 
 const {
@@ -82,16 +83,49 @@ const createMeeting = async (userId, data) => {
   return { meeting }
 }
 
-const getMeetingById = async (meetingId) => {
+const getMeetingById = async (meetingId, userId = null) => {
+  if (userId) {
+    const user = await userRepo.findById(userId);
+    if (user && user.hiddenMeetings && user.hiddenMeetings.map(id => id.toString()).includes(meetingId.toString())) {
+      const error = new Error("This meeting was removed from your dashboard and is no longer accessible");
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+
   const cacheKey = `meeting:${meetingId}`
   const cached = await getCache(cacheKey)
-  if (cached) return cached
+  if (cached) {
+    if (
+      userId &&
+      cached.meeting &&
+      cached.meeting.isHostDeleted &&
+      (cached.meeting.host?._id?.toString() === userId.toString() ||
+        cached.meeting.host?.toString() === userId.toString())
+    ) {
+      const error = new Error("Meeting not found or was deleted by you");
+      error.statusCode = 404;
+      throw error;
+    }
+    return cached;
+  }
 
   const meeting = await meetingRepo.findByIdPopulated(meetingId)
   if (!meeting) {
     const error = new Error("Meeting not found")
     error.statusCode = 404
     throw error
+  }
+
+  if (
+    userId &&
+    meeting.isHostDeleted &&
+    (meeting.host?._id?.toString() === userId.toString() ||
+      meeting.host?.toString() === userId.toString())
+  ) {
+    const error = new Error("Meeting not found or was deleted by you");
+    error.statusCode = 404;
+    throw error;
   }
 
   const result = { meeting }
@@ -138,12 +172,27 @@ const getUserMeetings = async (userId) => {
     .map((m) => m._id);
 
   const meetings = await Meeting.find({
-    $or: [
-      { host: userId },
-      { participants: userId },
-      { _id: { $in: visibleAttendedIds } },
+    $and: [
+      {
+        $or: [
+          // User is host, and meeting is NOT host-deleted
+          { host: userId, isHostDeleted: { $ne: true } },
+          // User is participant / attended (even if host deleted it, participant can still see it unless hidden)
+          {
+            $and: [
+              { host: { $ne: userId } },
+              {
+                $or: [
+                  { participants: userId },
+                  { _id: { $in: visibleAttendedIds } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      { _id: { $nin: hiddenIds } },
     ],
-    _id: { $nin: hiddenIds },
   })
     .populate("host", "name username profilePicture")
     .populate("participants", "name username profilePicture")
@@ -196,10 +245,37 @@ const deleteMeeting = async (meetingId, userId) => {
     throw error
   }
 
-  await meetingRepo.deleteById(meetingId)
-  await clearMeetingCaches(meetingId, userId)
+  // 1. Permanently delete recording file from Cloudinary and local disk if present
+  if (meeting.recordingUrl) {
+    await deleteMediaFile(meeting.recordingUrl);
+  }
 
-  return { message: "Meeting deleted successfully" }
+  // 2. Clear chat messages for this meeting
+  const chatRepo = require("../repositories/chatRepository");
+  await chatRepo.deleteAllByMeeting(meetingId);
+
+  // 3. Check if any participants attended / joined this meeting
+  const hasParticipants =
+    (meeting.participants && meeting.participants.length > 0) ||
+    meeting.status === "completed";
+
+  if (hasParticipants) {
+    // Keep meeting document for attendees to view meeting metadata and "Recording deleted by the host" notice.
+    // Mark as host-deleted and wipe recordingUrl so host will no longer see it on their dashboard.
+    await meetingRepo.updateById(meetingId, {
+      recordingUrl: "",
+      recordingDeletedByHost: true,
+      isHostDeleted: true,
+      hostDeletedAt: new Date(),
+    });
+  } else {
+    // If no other user ever attended or joined, permanently delete document from DB
+    await meetingRepo.deleteById(meetingId);
+  }
+
+  await clearMeetingCaches(meetingId, userId);
+
+  return { message: "Meeting deleted successfully" };
 }
 
 const joinMeeting = async (meetingId, userId) => {
@@ -269,69 +345,6 @@ const joinMeeting = async (meetingId, userId) => {
     },
   }
 }
-
-// const leaveMeeting = async (meetingId, userId) => {
-//   const meeting = await meetingRepo.findById(meetingId);
-
-//   if (!meeting) {
-//     const error = new Error("Meeting not found");
-//     error.statusCode = 404;
-//     throw error;
-//   }
-
-//   if (meeting.host.toString() === userId.toString()) {
-//     const error = new Error("Host cannot leave. Please end the meeting");
-//     error.statusCode = 400;
-//     throw error;
-//   }
-
-//   const user = await userRepo.findById(userId);
-
-//   await meetingRepo.removeParticipant(meetingId, userId);
-//   await clearMeetingCaches(meetingId, userId);
-
-//   const roomManager = require("../webrtc/roomManager");
-//   roomManager.removeUserFromRoom(meetingId, userId);
-
-//   // Add to user's attended history
-//   if (user) {
-//     const existing = user.attendedMeetings.find(
-//       (a) => a.meeting.toString() === meetingId.toString()
-//     );
-//     if (existing) {
-//       existing.leftAt = new Date();
-//     } else {
-//       user.attendedMeetings.push({
-//         meeting: meetingId,
-//         leftAt: new Date(),
-//       });
-//     }
-//     await user.save({ validateBeforeSave: false });
-//   }
-
-//   try {
-//     await notificationService.createNotification({
-//       recipient: meeting.host,
-//       sender: userId,
-//       type: "system",
-//       title: "Participant Left",
-//       message: `${user?.name || "A user"} left your meeting "${meeting.title}"`,
-//       link: `/meetings/${meetingId}`,
-//     });
-//   } catch (err) {
-//     console.log("Leave notification error:", err.message);
-//   }
-
-//   return {
-//     message: "Left meeting successfully",
-//     meetingId,
-//     userLeft: {
-//       userId: userId,
-//       name: user?.name || "A user",
-//       username: user?.username || "unknown",
-//     },
-//   };
-// };
 
 const startMeeting = async (meetingId, userId) => {
   const meeting = await meetingRepo.findById(meetingId)
@@ -424,65 +437,6 @@ const leaveMeeting = async (meetingId, userId) => {
   };
 };
 
-
-// const endMeeting = async (meetingId, userId) => {
-//   const meeting = await meetingRepo.findById(meetingId);
-//   if (!meeting) {
-//     const error = new Error("Meeting not found");
-//     error.statusCode = 404;
-//     throw error;
-//   }
-
-//   if (meeting.host.toString() !== userId.toString()) {
-//     const error = new Error("Only host can end the meeting");
-//     error.statusCode = 403;
-//     throw error;
-//   }
-
-//   const now = new Date();
-
-//   // Add host + all participants to attendedMeetings permanently
-//   const allUserIds = [meeting.host, ...meeting.participants];
-
-//   for (const uid of allUserIds) {
-//     const user = await userRepo.findById(uid);
-//     if (!user) continue;
-
-//     const exists = user.attendedMeetings.find(
-//       (a) => a.meeting.toString() === meetingId.toString()
-//     );
-
-//     if (!exists) {
-//       user.attendedMeetings.push({ meeting: meetingId, leftAt: now });
-//       await user.save({ validateBeforeSave: false });
-//     }
-//   }
-
-//   const updated = await meetingRepo.updateById(meetingId, {
-//     status: "completed",
-//     endedAt: now,
-//   });
-
-//   await clearMeetingCaches(meetingId, userId);
-
-//   await notifyParticipants(
-//     updated,
-//     userId,
-//     "meeting_ended",
-//     "Meeting Ended",
-//     `${updated.title} has been ended by the host`
-//   );
-
-//   roomManager.clearRoom(meetingId);
-
-//   const chatRepo = require("../repositories/chatRepository");
-//   await chatRepo.deleteAllByMeeting(meetingId);
-
-//   return { meeting: updated, meetingId };
-// };
-
-
-
 const endMeeting = async (meetingId, userId) => {
   const meeting = await meetingRepo.findById(meetingId);
   if (!meeting) {
@@ -541,27 +495,6 @@ const endMeeting = async (meetingId, userId) => {
 };
 
 // Remove meeting from user's visible list (hides it for this user only)
-// const hideMeetingFromUser = async (meetingId, userId) => {
-//   const user = await userRepo.findById(userId);
-//   if (!user) {
-//     const error = new Error("User not found");
-//     error.statusCode = 404;
-//     throw error;
-//   }
-
-//   const alreadyHidden = user.hiddenMeetings.some(
-//     (m) => m.toString() === meetingId.toString()
-//   );
-
-//   if (!alreadyHidden) {
-//     user.hiddenMeetings.push(meetingId);
-//     await user.save({ validateBeforeSave: false });
-//   }
-
-//   return { message: "Meeting removed from your list" };
-// };
-
-
 const hideMeetingFromUser = async (meetingId, userId) => {
   const user = await userRepo.findById(userId);
   if (!user) {
@@ -576,6 +509,61 @@ const hideMeetingFromUser = async (meetingId, userId) => {
   return { message: "Meeting removed from your list" };
 };
 
+// Upload or save meeting recording URL
+const uploadMeetingRecording = async (meetingId, userId, file, recordingUrl) => {
+  const meeting = await meetingRepo.findById(meetingId);
+  if (!meeting) {
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // Delete previous recording if one already exists
+  if (meeting.recordingUrl) {
+    await deleteMediaFile(meeting.recordingUrl);
+  }
+
+  let finalUrl = recordingUrl || "";
+
+  if (file && file.buffer) {
+    try {
+      const result = await uploadToCloudinary(file.buffer, {
+        subfolder: "recordings",
+        resource_type: "video",
+      });
+      finalUrl = result.secure_url;
+    } catch (cloudErr) {
+      console.warn("Cloudinary upload failed, falling back to disk:", cloudErr.message);
+      const fs = require("fs");
+      const path = require("path");
+      const uploadDir = path.join(__dirname, "../../uploads/recordings");
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const filename = `recording-${meetingId}-${Date.now()}.webm`;
+      const filePath = path.join(uploadDir, filename);
+      fs.writeFileSync(filePath, file.buffer);
+      finalUrl = `/uploads/recordings/${filename}`;
+    }
+  }
+
+  if (!finalUrl) {
+    const error = new Error("No recording data provided");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const updated = await meetingRepo.updateById(meetingId, {
+    recordingUrl: finalUrl,
+    recordingDeletedByHost: false,
+    isRecording: false,
+  });
+
+  await clearMeetingCaches(meetingId, meeting.host);
+
+  return { meeting: updated, recordingUrl: finalUrl };
+};
+
 module.exports = {
   createMeeting,
   getMeetingById,
@@ -588,4 +576,5 @@ module.exports = {
   startMeeting,
   endMeeting,
   hideMeetingFromUser,
+  uploadMeetingRecording,
 }

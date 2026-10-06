@@ -1,4 +1,5 @@
 
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -9,7 +10,13 @@ const routes = require('./index');
 
 const app = express();
 
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
+
+// Serve static uploaded recordings & files
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 app.use(cors({
   origin: '*',

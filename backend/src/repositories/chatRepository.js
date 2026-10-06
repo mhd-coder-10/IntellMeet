@@ -14,7 +14,7 @@ class ChatRepository extends BaseRepository {
   }
 
   findByMeeting(meetingId, limit = 50, skip = 0) {
-    return ChatMessage.find({ meeting: meetingId, isDeleted: false })
+    return ChatMessage.find({ meeting: meetingId })
       .populate("sender", "name username profilePicture")
       .sort({ createdAt: 1 })
       .skip(skip)

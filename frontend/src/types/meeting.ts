@@ -18,6 +18,10 @@ export interface Meeting {
     scheduledAt: string
     startedAt?: string | null
     endedAt?: string | null
+    recordingUrl?: string
+    isRecording?: boolean
+    recordingDeletedByHost?: boolean
+    isHostDeleted?: boolean
     status: 'scheduled' | 'ongoing' | 'completed' | 'cancelled'
     settings: {
         allowChat: boolean
