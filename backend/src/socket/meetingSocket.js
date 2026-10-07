@@ -218,6 +218,109 @@ const registerMeetingHandlers = (io, socket) => {
     });
   });
 
+  // Helper to verify if the requester is the meeting host
+  const isHostUser = async (meetingId, userId) => {
+    try {
+      const meetingRepo = require("../repositories/meetingRepository");
+      const meeting = await meetingRepo.findById(meetingId);
+      if (!meeting) return false;
+      const hostId = (meeting.host?._id || meeting.host)?.toString();
+      return hostId === userId.toString();
+    } catch (err) {
+      console.error("Host verification error:", err.message);
+      return false;
+    }
+  };
+
+  // Host mutes an individual participant
+  socket.on("meeting:mute-participant", async ({ meetingId, targetUserId }) => {
+    if (!meetingId || !targetUserId) return;
+
+    try {
+      const isHost = await isHostUser(meetingId, socket.user.id);
+      if (!isHost) {
+        socket.emit("meeting:error", {
+          message: "Only the meeting host can mute participants",
+        });
+        return;
+      }
+
+      const room = roomManager.getRoom(meetingId);
+      if (!room) return;
+
+      const targetIdStr = targetUserId.toString();
+      const targetUser = room.users.get(targetIdStr);
+      if (!targetUser) return;
+
+      // Update media state in room manager
+      roomManager.updateUserMediaState(meetingId, targetIdStr, { isMuted: true });
+
+      // Notify target user to actually mute local audio track
+      io.to(targetUser.socketId).emit("meeting:force-mute", {
+        meetingId,
+        mutedBy: socket.user.name || "Host",
+      });
+
+      // Broadcast updated media state to everyone in the room
+      io.to(meetingId).emit("meeting:media-state-changed", {
+        userId: targetIdStr,
+        isMuted: true,
+        isVideoOn: targetUser.isVideoOn,
+      });
+    } catch (err) {
+      console.error("Mute participant error:", err.message);
+    }
+  });
+
+  // Host mutes all non-host participants in the room
+  socket.on("meeting:mute-all", async ({ meetingId }) => {
+    if (!meetingId) return;
+
+    try {
+      const isHost = await isHostUser(meetingId, socket.user.id);
+      if (!isHost) {
+        socket.emit("meeting:error", {
+          message: "Only the meeting host can mute all participants",
+        });
+        return;
+      }
+
+      const room = roomManager.getRoom(meetingId);
+      if (!room) return;
+
+      const hostIdStr = socket.user.id.toString();
+
+      room.users.forEach((user, uId) => {
+        if (uId !== hostIdStr) {
+          // Update in room manager
+          roomManager.updateUserMediaState(meetingId, uId, { isMuted: true });
+
+          // Direct force mute to user socket
+          io.to(user.socketId).emit("meeting:force-mute", {
+            meetingId,
+            mutedBy: socket.user.name || "Host",
+            isMuteAll: true,
+          });
+
+          // Broadcast state change to room
+          io.to(meetingId).emit("meeting:media-state-changed", {
+            userId: uId,
+            isMuted: true,
+            isVideoOn: user.isVideoOn,
+          });
+        }
+      });
+
+      // Also broadcast room-wide event for confirmation
+      socket.to(meetingId).emit("meeting:force-mute-all", {
+        meetingId,
+        mutedBy: socket.user.name || "Host",
+      });
+    } catch (err) {
+      console.error("Mute all error:", err.message);
+    }
+  });
+
   // Handle host ending meeting via socket
   socket.on("meeting:end", async ({ meetingId }) => {
     if (!meetingId) return;

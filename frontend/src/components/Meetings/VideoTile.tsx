@@ -13,6 +13,7 @@ interface Props {
   isLocal?: boolean;
   isScreenSharing?: boolean;
   isHost?: boolean;
+  isSpeaking?: boolean;
   className?: string;
 }
 
@@ -25,6 +26,7 @@ export function VideoTile({
   isLocal = false,
   isScreenSharing = false,
   isHost = false,
+  isSpeaking = false,
   className,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -94,9 +96,9 @@ export function VideoTile({
 
   return (
     <div
-      className={`relative bg-gray-900 rounded-lg overflow-hidden select-none ${
-        className || "aspect-video"
-      }`}
+      className={`relative bg-gray-900 rounded-lg overflow-hidden select-none transition-all duration-200 ${
+        isSpeaking && !isMuted ? "ring-2 ring-blue-500 shadow-[0_0_16px_rgba(59,130,246,0.4)]" : ""
+      } ${className || "aspect-video"}`}
     >
       {/* Video Element */}
       {hasStream && (
@@ -133,6 +135,13 @@ export function VideoTile({
 
       {/* Bottom Status Info Tag */}
       <div className="absolute bottom-2 left-2 z-20 flex items-center gap-2 bg-black/70 backdrop-blur-sm text-white text-xs px-2.5 py-1 rounded-md border border-white/10">
+        {isSpeaking && !isMuted && (
+          <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-blue-500/20 text-blue-400 text-[10px]" title="Speaking">
+            <span className="w-1 h-2 bg-blue-400 rounded-full animate-pulse" />
+            <span className="w-1 h-3 bg-blue-400 rounded-full animate-pulse [animation-delay:150ms]" />
+            <span className="w-1 h-1.5 bg-blue-400 rounded-full animate-pulse [animation-delay:300ms]" />
+          </span>
+        )}
         {isScreenSharing && <Monitor className="h-3 w-3 text-blue-400" />}
         <span className="font-medium">
           {isLocal ? `${name || (isHost ? "Host" : "Member")} (You)` : name || (isHost ? "Host" : "Member")}

@@ -17,6 +17,7 @@ interface MeetingState {
     recordingUserName: string | null;
     recordingStartTime: number | null;
     screenSharingUserId: string | null;
+    activeSpeakerId: string | null;
     setCurrentMeetingId: (id: string | null) => void;
     setLocalStream: (stream: MediaStream | null) => void;
     setPeers: (peers: VideoPeer[]) => void;
@@ -34,6 +35,7 @@ interface MeetingState {
         recordingStartTime?: number | null
     ) => void;
     setScreenSharingUserId: (userId: string | null) => void;
+    setActiveSpeakerId: (userId: string | null) => void;
     resetMeeting: () => void;
 }
 
@@ -49,6 +51,7 @@ export const useMeetingStore = create<MeetingState>((set) => ({
     recordingUserName: null,
     recordingStartTime: null,
     screenSharingUserId: null,
+    activeSpeakerId: null,
 
     setCurrentMeetingId: (id) => set({ currentMeetingId: id }),
     setLocalStream: (stream) => set({ localStream: stream }),
@@ -116,6 +119,8 @@ export const useMeetingStore = create<MeetingState>((set) => ({
         }),
     setScreenSharingUserId: (userId) =>
         set({ screenSharingUserId: userId ? String(userId) : null }),
+    setActiveSpeakerId: (userId) =>
+        set({ activeSpeakerId: userId ? String(userId) : null }),
 
     resetMeeting: () =>
         set({
@@ -130,5 +135,6 @@ export const useMeetingStore = create<MeetingState>((set) => ({
             recordingUserName: null,
             recordingStartTime: null,
             screenSharingUserId: null,
+            activeSpeakerId: null,
         }),
 }));
