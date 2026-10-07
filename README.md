@@ -33,5 +33,25 @@ API docs at http://localhost:5100/api-docs
 - Day 6: Chat + Notifications
 - Day 7: Week 1 Checkpoint
 
-## Author
-Zidio Development Internship - March 2026
+
+## Week 2 Progress
+- Day 8: Frontend Setup (React 19, Tailwind, shadcn/ui)
+- Day 9: Authentication Pages & Protected Routes
+- Day 10: Meeting Lobby & Video Room with WebRTC
+- day 11: Real-Time Chat with Typing Indicators
+- Day 12: Screen Sharing & Meeting Recording
+- Day 13: Live Participant List & Mute Controls
+- Day 14: Week 2 Checkpoint
+
+### Frontend Features (Week 2)
+- User authentication pages with validation
+- Protected routes with session persistence
+- Meeting lobby (create, join, list)
+- Multi-user video calls via WebRTC
+- Camera on/off and mute controls
+- Screen sharing across participants
+- Composite meeting recording (host only)
+- Real-time chat with typing indicators
+- Live participant list with presence
+- Host controls (force mute, kick, end meeting)
+- Toast notifications for all actions
