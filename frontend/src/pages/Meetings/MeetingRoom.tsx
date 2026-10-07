@@ -12,6 +12,7 @@ import { useChat } from "@/hooks/useChat";
 import { useCompositeRecording } from "@/hooks/useCompositeRecording";
 import { useMeetingStore } from "@/store/meetingStore";
 import { useAuthStore } from "@/store/authStore";
+import { useActiveSpeaker } from "@/hooks/useActiveSpeaker";
 import {
   getMeetingById,
   joinMeeting,
@@ -22,6 +23,7 @@ import {
 import { VideoTile } from "@/components/Meetings/VideoTile";
 import { MeetingControls } from "@/components/Meetings/MeetingControls";
 import { ChatPanel } from "@/components/Chat/ChatPanel";
+import { ParticipantList } from "@/components/Meetings/ParticipantList";
 import { RecordConsentModal } from "@/components/Meetings/RecordConsentModal";
 import { RecordingPreviewModal } from "@/components/Meetings/RecordingPreviewModal";
 import { RecordStopConfirmModal } from "@/components/Meetings/RecordStopConfirmModal";
@@ -43,6 +45,7 @@ export default function MeetingRoom() {
   const queryClient = useQueryClient();
 
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
@@ -67,7 +70,6 @@ export default function MeetingRoom() {
     setIsScreenSharing,
     setRecordingState,
     setScreenSharingUserId,
-    updatePeer,
     resetMeeting,
   } = useMeetingStore();
 
@@ -114,6 +116,13 @@ export default function MeetingRoom() {
     clearRecordedResult,
     isRecorderActive,
   } = useCompositeRecording();
+
+  const { isSpeaking } = useActiveSpeaker({
+    localStream,
+    peers,
+    currentUserId: user?.id,
+    isMuted,
+  });
 
   const isEndingMeetingRef = useRef(false);
   const isLeavingMeetingRef = useRef(false);
@@ -255,11 +264,41 @@ export default function MeetingRoom() {
       playRecordingStopChime();
     };
 
+    // Handle force mute by meeting host
+    const handleForceMute = (data?: { mutedBy?: string; isMuteAll?: boolean }) => {
+      if (isHost) return;
+
+      const { localStream, setIsMuted, isVideoOn } = useMeetingStore.getState();
+
+      if (localStream) {
+        localStream.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
+
+      setIsMuted(true);
+
+      socket.emit("meeting:media-state", {
+        meetingId: id,
+        isMuted: true,
+        isVideoOn,
+      });
+
+      const mutedBy = data?.mutedBy || "Host";
+      if (data?.isMuteAll) {
+        toast.info(`🔇 ${mutedBy} muted all participants`);
+      } else {
+        toast.info(`🔇 ${mutedBy} muted your microphone`);
+      }
+    };
+
     socket.on("meeting:joined", handleJoined);
     socket.on("meeting:screen-share-started", handleScreenStart);
     socket.on("meeting:screen-share-stopped", handleScreenStop);
     socket.on("meeting:recording-started", handleRecordStart);
     socket.on("meeting:recording-stopped", handleRecordStop);
+    socket.on("meeting:force-mute", handleForceMute);
+    socket.on("meeting:force-mute-all", handleForceMute);
 
     return () => {
       socket.off("meeting:joined", handleJoined);
@@ -267,8 +306,10 @@ export default function MeetingRoom() {
       socket.off("meeting:screen-share-stopped", handleScreenStop);
       socket.off("meeting:recording-started", handleRecordStart);
       socket.off("meeting:recording-stopped", handleRecordStop);
+      socket.off("meeting:force-mute", handleForceMute);
+      socket.off("meeting:force-mute-all", handleForceMute);
     };
-  }, [socket, setScreenSharingUserId, setRecordingState]);
+  }, [socket, setScreenSharingUserId, setRecordingState, isHost, id]);
 
   const handleLeave = async () => {
     if (isLeavingMeetingRef.current || isEndingMeetingRef.current) return;
@@ -457,6 +498,25 @@ export default function MeetingRoom() {
     }
   };
 
+  // Host moderation: Mute specific participant
+  const handleMuteParticipant = (targetUserId: string, targetName: string) => {
+    if (!socket || !id || !isHost) return;
+    socket.emit("meeting:mute-participant", {
+      meetingId: id,
+      targetUserId,
+    });
+    toast.info(`Muted ${targetName}`);
+  };
+
+  // Host moderation: Mute all non-host participants
+  const handleMuteAll = () => {
+    if (!socket || !id || !isHost) return;
+    socket.emit("meeting:mute-all", {
+      meetingId: id,
+    });
+    toast.info("Muted all participants");
+  };
+
   // Redirect to Details if meeting has concluded
   useEffect(() => {
     if (isEndingMeetingRef.current || isLeavingMeetingRef.current) return;
@@ -525,10 +585,26 @@ export default function MeetingRoom() {
         </div>
 
         <div className="flex items-center gap-3 text-sm text-gray-400">
-          <div className="flex items-center gap-1.5 bg-gray-800/60 px-2.5 py-1 rounded-full text-xs">
-            <Users className="h-3.5 w-3.5 text-gray-400" />
-            <span>{peers.length + 1} {peers.length === 0 ? "Member" : "Members"}</span>
-          </div>
+          {/* People / Participants Drawer Toggle Button */}
+          <Button
+            variant={isParticipantsOpen ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => {
+              setIsParticipantsOpen((v) => {
+                const next = !v;
+                if (next) setIsChatOpen(false);
+                return next;
+              });
+            }}
+            className="text-gray-300 hover:text-white rounded-lg relative"
+            title="Toggle participants list"
+          >
+            <Users className="h-4 w-4 mr-1.5" />
+            People
+            <span className="ml-1.5 px-1.5 py-0.2 bg-gray-800 text-[11px] font-medium rounded-full text-gray-300 border border-gray-700/60">
+              {peers.length + 1}
+            </span>
+          </Button>
 
           <span className="text-xs font-mono bg-gray-800/80 text-gray-300 px-2.5 py-1 rounded border border-gray-700/50">
             {meeting?.meetingCode}
@@ -552,8 +628,14 @@ export default function MeetingRoom() {
             variant={isChatOpen ? "secondary" : "ghost"}
             size="sm"
             onClick={() => {
-              setIsChatOpen((v) => !v);
-              if (!isChatOpen) setUnreadCount(0);
+              setIsChatOpen((v) => {
+                const next = !v;
+                if (next) {
+                  setIsParticipantsOpen(false);
+                  setUnreadCount(0);
+                }
+                return next;
+              });
             }}
             className="text-gray-300 hover:text-white rounded-lg relative"
           >
@@ -597,6 +679,7 @@ export default function MeetingRoom() {
                 isLocal={screenPresenter.isLocal}
                 isScreenSharing
                 isHost={screenPresenter.isHost}
+                isSpeaking={isSpeaking(screenPresenter.isLocal ? (user?.id || "") : (presenterPeer?.userId || ""))}
                 className="w-full h-full object-contain"
               />
             </div>
@@ -614,6 +697,7 @@ export default function MeetingRoom() {
                     isVideoOn={isVideoOn}
                     isLocal
                     isHost={isHost}
+                    isSpeaking={isSpeaking(user?.id || "")}
                   />
                 </div>
               )}
@@ -629,6 +713,7 @@ export default function MeetingRoom() {
                     isVideoOn={isVideoOn}
                     isLocal
                     isHost={isHost}
+                    isSpeaking={isSpeaking(user?.id || "")}
                   />
                 </div>
               )}
@@ -652,6 +737,7 @@ export default function MeetingRoom() {
                       isMuted={peer.isMuted}
                       isVideoOn={peer.isVideoOn}
                       isHost={(meeting?.host?._id || meeting?.host)?.toString() === peer.userId?.toString()}
+                      isSpeaking={isSpeaking(peer.userId)}
                     />
                   </div>
                 ))}
@@ -670,6 +756,7 @@ export default function MeetingRoom() {
                 isLocal
                 isHost={isHost}
                 isScreenSharing={isLocalSharing}
+                isSpeaking={isSpeaking(user?.id || "")}
               />
 
               {peers.map((peer) => (
@@ -681,6 +768,7 @@ export default function MeetingRoom() {
                   isMuted={peer.isMuted}
                   isVideoOn={peer.isVideoOn}
                   isHost={meeting?.host?._id === peer.userId}
+                  isSpeaking={isSpeaking(peer.userId)}
                   isScreenSharing={Boolean(
                     screenSharingUserId &&
                       String(screenSharingUserId) === String(peer.userId)
@@ -701,6 +789,27 @@ export default function MeetingRoom() {
               </div>
             )}
           </div>
+        )}
+
+        {isParticipantsOpen && (
+          <ParticipantList
+            currentUser={{
+              id: user?.id || "",
+              name: user?.name || "You",
+              profilePicture: user?.profilePicture,
+              isMuted,
+              isVideoOn,
+              isScreenSharing: isLocalSharing,
+              isHost,
+            }}
+            peers={peers}
+            meetingHostId={(meeting?.host?._id || meeting?.host)?.toString()}
+            screenSharingUserId={screenSharingUserId}
+            isSpeaking={isSpeaking}
+            onMuteParticipant={handleMuteParticipant}
+            onMuteAll={handleMuteAll}
+            onClose={() => setIsParticipantsOpen(false)}
+          />
         )}
 
         {isChatOpen && (
