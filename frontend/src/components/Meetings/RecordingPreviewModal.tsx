@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
-  Download,
   CheckCircle2,
   X,
   Clock,
@@ -18,7 +18,6 @@ interface RecordingPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   result: RecordedResult | null;
-  onDownload: () => void;
   meetingTitle?: string;
   meetingId?: string;
 }
@@ -43,10 +42,10 @@ export function RecordingPreviewModal({
   isOpen,
   onClose,
   result,
-  onDownload,
   meetingTitle,
   meetingId,
 }: RecordingPreviewModalProps) {
+  const queryClient = useQueryClient();
   const [isUploading, setIsUploading] = useState(false);
   const [isSavedCloud, setIsSavedCloud] = useState(false);
 
@@ -58,9 +57,15 @@ export function RecordingPreviewModal({
     const saveToMeeting = async () => {
       setIsUploading(true);
       try {
-        await uploadMeetingRecording(meetingId, result.blob);
+        await uploadMeetingRecording(meetingId, result.blob, {
+          title: meetingTitle ? `${meetingTitle} - Recording` : undefined,
+          duration: result.duration,
+          size: result.size,
+        });
         if (!cancelled) {
           setIsSavedCloud(true);
+          await queryClient.invalidateQueries({ queryKey: ["meeting", meetingId] });
+          await queryClient.invalidateQueries({ queryKey: ["meetings"] });
           toast.success("Recording saved to Meeting Details!");
         }
       } catch (err) {
@@ -121,6 +126,7 @@ export function RecordingPreviewModal({
             <video
               src={result.url}
               controls
+              controlsList="nodownload"
               playsInline
               className="w-full h-full object-contain"
             />
@@ -165,18 +171,10 @@ export function RecordingPreviewModal({
 
           <div className="flex items-center gap-3">
             <Button
-              variant="ghost"
               onClick={onClose}
-              className="text-gray-300 hover:text-white hover:bg-gray-800 rounded-lg text-sm"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg px-5 py-2 text-sm shadow-md shadow-blue-900/30"
             >
-              Close
-            </Button>
-            <Button
-              onClick={onDownload}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg px-4 flex items-center gap-2 shadow-lg shadow-blue-900/30 text-sm"
-            >
-              <Download className="w-4 h-4" />
-              Download Video
+              Done
             </Button>
           </div>
         </div>

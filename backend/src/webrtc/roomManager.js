@@ -25,8 +25,9 @@ const getRoom = (meetingId) => {
 // Add a user to a room
 const addUserToRoom = (meetingId, userId, socketId, userInfo) => {
   const room = createRoom(meetingId);
-  room.users.set(userId.toString(), {
-    userId,
+  const uIdStr = userId ? userId.toString() : "";
+  room.users.set(uIdStr, {
+    userId: uIdStr,
     socketId,
     ...userInfo,
     joinedAt: new Date(),
@@ -42,13 +43,15 @@ const removeUserFromRoom = (meetingId, userId) => {
   const room = activeRooms.get(meetingId);
   if (!room) return null;
 
+  const wasScreenSharing = Boolean(
+    room.screenSharingUserId &&
+    room.screenSharingUserId.toString() === userId.toString()
+  );
+
   room.users.delete(userId.toString());
 
   // Clear screen share if this user was sharing
-  if (
-    room.screenSharingUserId &&
-    room.screenSharingUserId.toString() === userId.toString()
-  ) {
+  if (wasScreenSharing) {
     room.screenSharingUserId = null;
   }
 
@@ -63,7 +66,7 @@ const removeUserFromRoom = (meetingId, userId) => {
   if (room.users.size === 0) {
     activeRooms.delete(meetingId);
   }
-  return room;
+  return { room, wasScreenSharing };
 };
 
 // Clear a room entirely
@@ -99,7 +102,7 @@ const updateUserMediaState = (meetingId, userId, state) => {
 const setScreenSharingUser = (meetingId, userId) => {
   const room = activeRooms.get(meetingId);
   if (!room) return null;
-  room.screenSharingUserId = userId;
+  room.screenSharingUserId = userId ? userId.toString() : null;
   return room;
 };
 
@@ -114,7 +117,7 @@ const clearScreenSharingUser = (meetingId) => {
 // Get current screen sharing user
 const getScreenSharingUser = (meetingId) => {
   const room = activeRooms.get(meetingId);
-  return room?.screenSharingUserId || null;
+  return room?.screenSharingUserId ? room.screenSharingUserId.toString() : null;
 };
 
 // Set who is recording

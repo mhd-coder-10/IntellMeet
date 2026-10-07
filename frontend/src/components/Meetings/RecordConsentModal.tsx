@@ -41,13 +41,13 @@ export function RecordConsentModal({
         {/* Content info */}
         <div className="space-y-3.5 text-sm text-gray-300">
           <p className="leading-relaxed">
-            Recording will capture participant cameras, active screens, and mixed audio in high quality.
+            Recording will capture member webcams, active screens, and mixed audio in high quality.
           </p>
 
           <div className="grid grid-cols-3 gap-2.5 py-2">
             <div className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-gray-800/60 border border-gray-700/40 text-center">
               <Users className="w-4 h-4 text-blue-400 mb-1" />
-              <span className="text-[11px] text-gray-300">Live Grid</span>
+              <span className="text-[11px] text-gray-300">Member Grid</span>
             </div>
             <div className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-gray-800/60 border border-gray-700/40 text-center">
               <Monitor className="w-4 h-4 text-emerald-400 mb-1" />
@@ -65,7 +65,7 @@ export function RecordConsentModal({
             <div>
               <span className="font-semibold text-amber-300">Consent reminder: </span>
               Recording without the consent of all attendees may violate privacy regulations.
-              Please ensure all participants agree to being recorded.
+              Please ensure all members agree to being recorded.
             </div>
           </div>
         </div>

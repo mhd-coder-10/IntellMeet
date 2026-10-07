@@ -22,6 +22,7 @@ const registerSignalingHandlers = (io, socket) => {
       fromUserId: socket.user.id,
       fromUsername: socket.user.username,
       fromName: socket.user.name,
+      fromProfilePicture: socket.user.profilePicture,
       sdp,
       isMuted: isMuted ?? false,
       isVideoOn: isVideoOn ?? true,

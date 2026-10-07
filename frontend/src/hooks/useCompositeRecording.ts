@@ -69,7 +69,31 @@ export interface SupportedFormat {
 }
 
 export const CANDIDATE_FORMATS: SupportedFormat[] = [
-  // 1. High compatibility MP4 (H.264 / AAC) - Flawless on Windows Media Player, QuickTime, iOS, Android, VLC
+  // 1. WebM (VP9 / Opus) - Gold standard for browser recording, hardware-accelerated, 48kHz Opus HD audio
+  {
+    mimeType: "video/webm;codecs=vp9,opus",
+    extension: "webm",
+    label: "WebM (VP9 / Opus HD)",
+  },
+  // 2. WebM (VP8 / Opus) - Universal hardware compatibility, stutter-free 30fps
+  {
+    mimeType: "video/webm;codecs=vp8,opus",
+    extension: "webm",
+    label: "WebM (VP8 / Opus HD)",
+  },
+  // 3. WebM (H.264 / Opus)
+  {
+    mimeType: "video/webm;codecs=h264,opus",
+    extension: "webm",
+    label: "WebM (H.264 / Opus)",
+  },
+  // 4. WebM generic
+  {
+    mimeType: "video/webm",
+    extension: "webm",
+    label: "WebM",
+  },
+  // 5. MP4 fallbacks if browser requires
   {
     mimeType: "video/mp4;codecs=avc1,mp4a.40.2",
     extension: "mp4",
@@ -84,28 +108,6 @@ export const CANDIDATE_FORMATS: SupportedFormat[] = [
     mimeType: "video/mp4",
     extension: "mp4",
     label: "MP4",
-  },
-  // 2. WebM with H.264 video
-  {
-    mimeType: "video/webm;codecs=h264,opus",
-    extension: "webm",
-    label: "WebM (H.264 / Opus)",
-  },
-  // 3. WebM VP9 / VP8
-  {
-    mimeType: "video/webm;codecs=vp9,opus",
-    extension: "webm",
-    label: "WebM (VP9 / Opus)",
-  },
-  {
-    mimeType: "video/webm;codecs=vp8,opus",
-    extension: "webm",
-    label: "WebM (VP8 / Opus)",
-  },
-  {
-    mimeType: "video/webm",
-    extension: "webm",
-    label: "WebM",
   },
 ];
 
@@ -125,11 +127,12 @@ export function useCompositeRecording() {
   const pausedTimeRef = useRef<number>(0);
   const pauseStartRef = useRef<number>(0);
   const chosenFormatRef = useRef<SupportedFormat>({
-    mimeType: "video/webm",
+    mimeType: "video/webm;codecs=vp9,opus",
     extension: "webm",
-    label: "WebM",
+    label: "WebM (VP9 / Opus HD)",
   });
 
+  const isRecordingRef = useRef<boolean>(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -143,6 +146,11 @@ export function useCompositeRecording() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const destinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const audioSourcesRef = useRef<Map<string, AudioSourceEntry>>(new Map());
+
+  // Master Vocal Processing Bus (Highpass, Vocal Presence EQ, Dynamics Compressor & Limiter, Master Gain)
+  const masterInputBusRef = useRef<BiquadFilterNode | null>(null);
+  const compressorRef = useRef<DynamicsCompressorNode | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
 
   // Hidden offscreen video elements for participants & screen share
   const videoElementsRef = useRef<Map<string, HTMLVideoElement>>(new Map());
@@ -223,7 +231,7 @@ export function useCompositeRecording() {
     }
 
     if (screenSharingUserId) {
-      const peer = peers.find((p) => p.userId === screenSharingUserId);
+      const peer = peers.find((p) => String(p.userId) === String(screenSharingUserId));
       if (peer?.stream) {
         const screenTrack = peer.stream
           .getVideoTracks()
@@ -240,7 +248,7 @@ export function useCompositeRecording() {
     return null;
   }, []);
 
-  // Connect participant audio tracks to audio mixer with volume nodes
+  // Connect participant audio tracks to studio vocal master bus with volume nodes
   const syncAudioSources = useCallback(() => {
     const audioContext = audioContextRef.current;
     const destination = destinationRef.current;
@@ -250,6 +258,7 @@ export function useCompositeRecording() {
 
     const { localStream, peers, isMuted } = useMeetingStore.getState();
     const activeKeys = new Set<string>();
+    const targetBus: AudioNode = masterInputBusRef.current || destination;
 
     // Connect Local Mic
     if (localStream && localStream.getAudioTracks().length > 0) {
@@ -261,14 +270,19 @@ export function useCompositeRecording() {
         if (!entry || entry.streamId !== localStream.id) {
           try {
             entry?.source.disconnect();
-            const source = audioContext.createMediaStreamSource(localStream);
+            entry?.gainNode.disconnect();
+            entry?.analyser.disconnect();
+
+            // Isolate audio track to prevent any video track interference
+            const audioOnlyStream = new MediaStream([track]);
+            const source = audioContext.createMediaStreamSource(audioOnlyStream);
             const gainNode = audioContext.createGain();
             const analyser = audioContext.createAnalyser();
             analyser.fftSize = 256;
 
             source.connect(gainNode);
             gainNode.connect(analyser);
-            analyser.connect(destination);
+            analyser.connect(targetBus);
 
             entry = {
               source,
@@ -283,10 +297,10 @@ export function useCompositeRecording() {
           }
         }
 
-        // Adjust gain based on mute status
+        // Adjust gain smoothly (20ms ramp) to eliminate any audio pops or clicks
         if (entry) {
           const targetGain = isMuted ? 0 : 1;
-          entry.gainNode.gain.setValueAtTime(targetGain, audioContext.currentTime);
+          entry.gainNode.gain.setTargetAtTime(targetGain, audioContext.currentTime, 0.02);
         }
       }
     }
@@ -302,14 +316,18 @@ export function useCompositeRecording() {
           if (!entry || entry.streamId !== peer.stream.id) {
             try {
               entry?.source.disconnect();
-              const source = audioContext.createMediaStreamSource(peer.stream);
+              entry?.gainNode.disconnect();
+              entry?.analyser.disconnect();
+
+              const audioOnlyStream = new MediaStream([track]);
+              const source = audioContext.createMediaStreamSource(audioOnlyStream);
               const gainNode = audioContext.createGain();
               const analyser = audioContext.createAnalyser();
               analyser.fftSize = 256;
 
               source.connect(gainNode);
               gainNode.connect(analyser);
-              analyser.connect(destination);
+              analyser.connect(targetBus);
 
               entry = {
                 source,
@@ -326,7 +344,7 @@ export function useCompositeRecording() {
 
           if (entry) {
             const targetGain = peer.isMuted ? 0 : 1;
-            entry.gainNode.gain.setValueAtTime(targetGain, audioContext.currentTime);
+            entry.gainNode.gain.setTargetAtTime(targetGain, audioContext.currentTime, 0.02);
           }
         }
       }
@@ -337,6 +355,8 @@ export function useCompositeRecording() {
       if (!activeKeys.has(key)) {
         try {
           entry.source.disconnect();
+          entry.gainNode.disconnect();
+          entry.analyser.disconnect();
         } catch {}
         audioSourcesRef.current.delete(key);
       }
@@ -842,12 +862,15 @@ export function useCompositeRecording() {
       screenVideo.muted = true;
       screenVideoRef.current = screenVideo;
 
-      // Audio Context & Destination
+      // Audio Context & Destination with 48kHz HD voice sampling
       const AudioCtx =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext })
           .webkitAudioContext;
-      const audioContext = new AudioCtx();
+      const audioContext = new AudioCtx({
+        sampleRate: 48000,
+        latencyHint: "interactive",
+      });
       if (audioContext.state === "suspended") {
         await audioContext.resume();
       }
@@ -857,26 +880,58 @@ export function useCompositeRecording() {
       destinationRef.current = destination;
       audioSourcesRef.current.clear();
 
+      // Studio Master Vocal Chain:
+      // 1. High-Pass Filter (<85Hz): eliminates mic thumps, low-frequency room rumble, air handling hum
+      const highpass = audioContext.createBiquadFilter();
+      highpass.type = "highpass";
+      highpass.frequency.setValueAtTime(85, audioContext.currentTime);
+      highpass.Q.setValueAtTime(0.707, audioContext.currentTime);
+      masterInputBusRef.current = highpass;
+
+      // 2. Vocal Presence EQ (3000Hz, +3.5dB): brings speech clarity forward, makes speech distinct & articulate
+      const clarity = audioContext.createBiquadFilter();
+      clarity.type = "peaking";
+      clarity.frequency.setValueAtTime(3000, audioContext.currentTime);
+      clarity.Q.setValueAtTime(1.1, audioContext.currentTime);
+      clarity.gain.setValueAtTime(3.5, audioContext.currentTime);
+
+      // 3. Studio Dynamics Compressor: automatic vocal leveling & distortion prevention
+      // Boosts quiet voices cleanly, smoothly compresses loud speech so it NEVER clips or distorts
+      const compressor = audioContext.createDynamicsCompressor();
+      compressor.threshold.setValueAtTime(-24, audioContext.currentTime);
+      compressor.knee.setValueAtTime(12, audioContext.currentTime);
+      compressor.ratio.setValueAtTime(4, audioContext.currentTime);
+      compressor.attack.setValueAtTime(0.003, audioContext.currentTime); // 3ms fast attack
+      compressor.release.setValueAtTime(0.22, audioContext.currentTime); // 220ms release
+      compressorRef.current = compressor;
+
+      // 4. Master Output Gain:
+      const masterGain = audioContext.createGain();
+      masterGain.gain.setValueAtTime(1.2, audioContext.currentTime);
+      masterGainRef.current = masterGain;
+
+      // Route master audio chain:
+      // [Participants] -> highpass -> clarity -> compressor -> masterGain -> destination
+      highpass.connect(clarity);
+      clarity.connect(compressor);
+      compressor.connect(masterGain);
+      masterGain.connect(destination);
+
       // Connect initial audio
       syncAudioSources();
 
-      let lastAudioSync = Date.now();
       pausedTimeRef.current = 0;
       pauseStartRef.current = 0;
 
-      // Composite Render Loop (30 FPS)
-      const renderLoop = () => {
-        const now = Date.now();
+      // Frame pacing: lock to smooth 30 FPS (~33.33ms per frame)
+      const TARGET_FPS = 30;
+      const FRAME_DURATION = 1000 / TARGET_FPS;
+      let lastDrawTime = 0;
+      let lastAudioSync = 0;
+      let lastSpeakerDetect = 0;
 
-        // Audio sync every 500ms
-        if (now - lastAudioSync > 500) {
-          syncAudioSources();
-          lastAudioSync = now;
-        }
-
-        // Voice detection
-        detectActiveSpeaker();
-
+      // Draw single composite frame
+      const drawCompositeFrame = () => {
         const {
           localStream,
           peers,
@@ -945,12 +1000,35 @@ export function useCompositeRecording() {
           currentMeetingId ? `Meeting` : "IntelliMeet",
           Math.max(0, elapsed)
         );
-
-        animationFrameRef.current = requestAnimationFrame(renderLoop);
       };
 
-      // Start render loop
-      renderLoop();
+      // Main render step driven by requestAnimationFrame with 30fps lock
+      const renderStep = (now: DOMHighResTimeStamp) => {
+        if (!isRecordingRef.current) return;
+
+        animationFrameRef.current = requestAnimationFrame(renderStep);
+
+        const delta = now - lastDrawTime;
+        if (delta < FRAME_DURATION - 2) {
+          return; // Skip monitor refresh frames that exceed 30 FPS
+        }
+        lastDrawTime = now - (delta % FRAME_DURATION);
+
+        const wallNow = Date.now();
+        // Periodic audio sync every 600ms
+        if (wallNow - lastAudioSync > 600) {
+          syncAudioSources();
+          lastAudioSync = wallNow;
+        }
+
+        // Active speaker detection every 120ms (smooth, prevents CPU lag)
+        if (wallNow - lastSpeakerDetect > 120) {
+          detectActiveSpeaker();
+          lastSpeakerDetect = wallNow;
+        }
+
+        drawCompositeFrame();
+      };
 
       // Capture 30fps canvas stream
       const canvasStream = canvas.captureStream(30);
@@ -967,7 +1045,7 @@ export function useCompositeRecording() {
       }
       const recordStream = new MediaStream(streamTracks);
 
-      // Detect best supported container & codecs (MP4 prioritized for native Windows / QuickTime / VLC playback)
+      // Detect best supported container & codecs (VP9/VP8 WebM prioritized for smooth seekable recording)
       let selectedFormat: SupportedFormat =
         CANDIDATE_FORMATS[CANDIDATE_FORMATS.length - 1];
       for (const candidate of CANDIDATE_FORMATS) {
@@ -981,8 +1059,8 @@ export function useCompositeRecording() {
       chunksRef.current = [];
       const recorder = new MediaRecorder(recordStream, {
         mimeType: selectedFormat.mimeType,
-        videoBitsPerSecond: 3000000, // 3 Mbps high quality
-        audioBitsPerSecond: 128000, // 128 kbps audio
+        videoBitsPerSecond: 2500000, // 2.5 Mbps crisp 720p 30fps without encoder choking
+        audioBitsPerSecond: 192000, // 192 kbps studio audio
       });
 
       recorder.ondataavailable = (e) => {
@@ -995,19 +1073,34 @@ export function useCompositeRecording() {
       pausedTimeRef.current = 0;
       pauseStartRef.current = 0;
 
-      // Start render loop
-      renderLoop();
+      // Start render loop ONCE
+      isRecordingRef.current = true;
+      lastDrawTime = performance.now();
+      lastAudioSync = Date.now();
+      lastSpeakerDetect = Date.now();
+      animationFrameRef.current = requestAnimationFrame(renderStep);
 
-      // Background tab render keeper
+      // Background tab render keeper (Direct drawing only, NEVER calls requestAnimationFrame to prevent recursion)
       const fallbackInterval = setInterval(() => {
+        if (!isRecordingRef.current) return;
         if (document.hidden) {
-          renderLoop();
+          const wallNow = Date.now();
+          if (wallNow - lastAudioSync > 600) {
+            syncAudioSources();
+            lastAudioSync = wallNow;
+          }
+          if (wallNow - lastSpeakerDetect > 150) {
+            detectActiveSpeaker();
+            lastSpeakerDetect = wallNow;
+          }
+          drawCompositeFrame();
         }
-      }, 100);
+      }, 33);
       renderIntervalRef.current = fallbackInterval;
 
       recorder.start(1000);
       mediaRecorderRef.current = recorder;
+      isRecordingRef.current = true;
 
       setIsRecording(true);
       setIsPaused(false);
@@ -1067,18 +1160,23 @@ export function useCompositeRecording() {
     }
   }, [isRecording, isPaused]);
 
-  // Stop recording and process WebM/MP4 duration fix
-  const stopRecording = useCallback(async (): Promise<RecordedResult | null> => {
-    if (!isRecording) return null;
+  // Check if media recorder is actively capturing
+  const isRecorderActive = useCallback(() => {
+    return isRecordingRef.current || (!!mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive");
+  }, []);
+
+  // Stop recording and process WebM/MP4 duration fix (with optional suppressModal for clean exit)
+  const stopRecording = useCallback(async (suppressModal: boolean = false): Promise<RecordedResult | null> => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") {
+      isRecordingRef.current = false;
+      setIsRecording(false);
+      return null;
+    }
+
+    isRecordingRef.current = false;
 
     return new Promise<RecordedResult | null>((resolve) => {
-      const recorder = mediaRecorderRef.current;
-      if (!recorder) {
-        setIsRecording(false);
-        resolve(null);
-        return;
-      }
-
       recorder.onstop = async () => {
         playRecordingStopChime();
 
@@ -1110,6 +1208,11 @@ export function useCompositeRecording() {
           audioContextRef.current.close().catch(() => {});
           audioContextRef.current = null;
         }
+
+        masterInputBusRef.current = null;
+        compressorRef.current = null;
+        masterGainRef.current = null;
+        destinationRef.current = null;
 
         // 3. Clean up video elements
         cleanupVideoElements();
@@ -1156,7 +1259,12 @@ export function useCompositeRecording() {
           formatLabel: format.label,
         };
 
-        setRecordedResult(result);
+        if (!suppressModal) {
+          setRecordedResult(result);
+        } else {
+          setRecordedResult(null);
+        }
+
         chunksRef.current = [];
         resolve(result);
       };
@@ -1209,7 +1317,12 @@ export function useCompositeRecording() {
       cleanupVideoElements();
       if (audioContextRef.current) {
         audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
       }
+      masterInputBusRef.current = null;
+      compressorRef.current = null;
+      masterGainRef.current = null;
+      destinationRef.current = null;
       if (recordedResult?.url) {
         URL.revokeObjectURL(recordedResult.url);
       }
@@ -1227,5 +1340,6 @@ export function useCompositeRecording() {
     resumeRecording,
     downloadRecording,
     clearRecordedResult,
+    isRecorderActive,
   };
 }

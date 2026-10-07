@@ -1,10 +1,11 @@
 // Manages WebRTC peer connections, media streams and screen sharing
-// Handles offer/answer, ICE candidates, camera toggle and screen share
+// Handles offer/answer, ICE candidates, camera toggle and screen share across all peers
 
 import { useCallback, useEffect, useRef } from "react";
 import type { Socket } from "socket.io-client";
 import { useMeetingStore } from "@/store/meetingStore";
 import { useAuthStore } from "@/store/authStore";
+import type { VideoPeer } from "@/types/meeting";
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
@@ -31,9 +32,46 @@ interface MeetingUser {
   isVideoOn?: boolean;
 }
 
+// Reliably finds the active video sender for a peer connection
+const getVideoSender = (pc: RTCPeerConnection): RTCRtpSender | null => {
+  // 1. Look for sender with an existing video track
+  const withTrack = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+  if (withTrack) return withTrack;
+
+  // 2. Look for transceiver whose receiver or sender track is video
+  const videoTransceiver = pc.getTransceivers().find(
+    (t) => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video"
+  );
+  if (videoTransceiver?.sender) return videoTransceiver.sender;
+
+  // 3. Fallback to sender without audio track
+  return pc.getSenders().find((s) => !s.track || s.track.kind !== "audio") || null;
+};
+
+// Rebuilds and syncs active tracks from all receivers into a fresh MediaStream
+const syncPeerStream = (
+  pc: RTCPeerConnection,
+  userId: string,
+  updatePeer: (id: string, updates: Partial<VideoPeer>) => void
+) => {
+  const freshStream = new MediaStream();
+  pc.getReceivers().forEach((r) => {
+    if (
+      r.track &&
+      r.track.readyState !== "ended" &&
+      !freshStream.getTracks().some((t) => t.id === r.track.id)
+    ) {
+      freshStream.addTrack(r.track);
+    }
+  });
+
+  if (freshStream.getTracks().length > 0) {
+    updatePeer(userId, { stream: freshStream });
+  }
+};
+
 export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const videoSendersRef = useRef<Map<string, RTCRtpSender>>(new Map());
   const screenStreamRef = useRef<MediaStream | null>(null);
   // Remember camera state before screen share to restore afterwards
   const wasVideoOnRef = useRef<boolean>(true);
@@ -53,10 +91,22 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   // Start local camera and microphone
   const startLocalStream = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
+      }
       setLocalStream(stream);
       return stream;
     } catch (error) {
@@ -65,17 +115,27 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     }
   }, [setLocalStream]);
 
-  // Create a new RTCPeerConnection for a peer
+  // Create a new RTCPeerConnection for a peer (offerer side)
   const createPeerConnection = useCallback(
     (peerInfo: PeerInfo, stream: MediaStream) => {
       const pc = new RTCPeerConnection(ICE_SERVERS);
+      const peerId = String(peerInfo.userId);
 
-      stream.getTracks().forEach((track) => {
-        const sender = pc.addTrack(track, stream);
-        if (track.kind === "video") {
-          videoSendersRef.current.set(peerInfo.userId, sender);
-        }
-      });
+      // Handle audio track or transceiver
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) {
+        pc.addTrack(audioTrack, stream);
+      } else {
+        pc.addTransceiver("audio", { direction: "sendrecv" });
+      }
+
+      // Handle video track or transceiver
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        pc.addTrack(videoTrack, stream);
+      } else {
+        pc.addTransceiver("video", { direction: "sendrecv" });
+      }
 
       pc.onicecandidate = (event) => {
         if (event.candidate && socket) {
@@ -88,11 +148,14 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       };
 
       pc.ontrack = (event) => {
-        const [remoteStream] = event.streams;
-        updatePeer(peerInfo.userId, { stream: remoteStream });
+        syncPeerStream(pc, peerInfo.userId, updatePeer);
+        if (event.track) {
+          event.track.onunmute = () => syncPeerStream(pc, peerInfo.userId, updatePeer);
+          event.track.onended = () => syncPeerStream(pc, peerInfo.userId, updatePeer);
+        }
       };
 
-      peerConnections.current.set(peerInfo.userId, pc);
+      peerConnections.current.set(peerId, pc);
       return pc;
     },
     [socket, meetingId, updatePeer]
@@ -126,47 +189,43 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     [socket, meetingId, createPeerConnection, addPeer, isMuted, isVideoOn]
   );
 
-  // Toggle camera by building a fresh MediaStream
-  // Fresh reference forces VideoTile useEffect to re-run
+  // Toggle camera: replaces video track with real camera or null
   const toggleVideo = useCallback(
     async (enabled: boolean) => {
       const currentStream = useMeetingStore.getState().localStream;
       if (!currentStream) return;
 
-      // Save existing audio tracks
       const audioTracks = currentStream.getAudioTracks();
-
-      // Stop old video tracks
       currentStream.getVideoTracks().forEach((track) => track.stop());
 
-      // Build a fresh MediaStream (new reference forces React re-render)
       const freshStream = new MediaStream();
       audioTracks.forEach((t) => freshStream.addTrack(t));
+
+      let newTrack: MediaStreamTrack | null = null;
 
       if (enabled) {
         try {
           const videoStream = await navigator.mediaDevices.getUserMedia({
             video: true,
           });
-          const newTrack = videoStream.getVideoTracks()[0];
+          newTrack = videoStream.getVideoTracks()[0];
           freshStream.addTrack(newTrack);
-
-          // Swap track on all peers
-          videoSendersRef.current.forEach((sender) => {
-            sender.replaceTrack(newTrack);
-          });
         } catch (error) {
           console.error("Failed to start camera:", error);
           throw error;
         }
-      } else {
-        // Remove video on all peers
-        videoSendersRef.current.forEach((sender) => {
-          sender.replaceTrack(null);
-        });
       }
 
-      // Set the new stream — this triggers VideoTile useEffect
+      // Replace video track across all peers using precise video sender
+      peerConnections.current.forEach((pc, peerId) => {
+        const videoSender = getVideoSender(pc);
+        if (videoSender) {
+          videoSender.replaceTrack(newTrack).catch((err) => {
+            console.warn(`replaceTrack error for peer ${peerId}:`, err);
+          });
+        }
+      });
+
       setLocalStream(freshStream);
     },
     [setLocalStream]
@@ -216,21 +275,22 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     });
 
     socket.on("meeting:user-left", ({ userId }) => {
-      const pc = peerConnections.current.get(userId);
+      const pc = peerConnections.current.get(String(userId));
       if (pc) {
         pc.close();
-        peerConnections.current.delete(userId);
+        peerConnections.current.delete(String(userId));
       }
-      videoSendersRef.current.delete(userId);
       removePeer(userId);
     });
 
+    // Handle incoming offer (answerer side): attach tracks to negotiated transceivers
     socket.on(
       "webrtc:offer",
       async ({
         fromUserId,
         fromUsername,
         fromName,
+        fromProfilePicture,
         sdp,
         isMuted: remoteMuted,
         isVideoOn: remoteVideoOn,
@@ -238,25 +298,61 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
         if (fromUserId === currentUserId) return;
         const stream = localStream || (await startLocalStream());
 
-        const peerInfo: PeerInfo = {
-          userId: fromUserId,
-          name: fromName || fromUsername,
-          username: fromUsername,
-          isMuted: remoteMuted ?? false,
-          isVideoOn: remoteVideoOn ?? true,
+        const pc = new RTCPeerConnection(ICE_SERVERS);
+        const peerId = String(fromUserId);
+
+        pc.onicecandidate = (event) => {
+          if (event.candidate && socket) {
+            socket.emit("webrtc:ice-candidate", {
+              meetingId,
+              toUserId: fromUserId,
+              candidate: event.candidate,
+            });
+          }
         };
 
-        const pc = createPeerConnection(peerInfo, stream);
+        pc.ontrack = (event) => {
+          syncPeerStream(pc, fromUserId, updatePeer);
+          if (event.track) {
+            event.track.onunmute = () => syncPeerStream(pc, fromUserId, updatePeer);
+            event.track.onended = () => syncPeerStream(pc, fromUserId, updatePeer);
+          }
+        };
+
+        peerConnections.current.set(peerId, pc);
 
         addPeer({
           userId: fromUserId,
           name: fromName || fromUsername,
           username: fromUsername,
+          profilePicture: fromProfilePicture,
           isMuted: remoteMuted ?? false,
           isVideoOn: remoteVideoOn ?? true,
         });
 
+        // 1. Set remote description from incoming offer first so transceivers match the offer
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+
+        // 2. Attach local tracks to the negotiated transceivers
+        const audioTrack = stream.getAudioTracks()[0];
+        const videoTrack = stream.getVideoTracks()[0];
+
+        pc.getTransceivers().forEach((transceiver) => {
+          const kind = transceiver.receiver?.track?.kind;
+          if (kind === "audio") {
+            if (audioTrack) {
+              transceiver.sender.replaceTrack(audioTrack).catch(console.warn);
+            }
+            transceiver.direction = "sendrecv";
+          } else if (kind === "video") {
+            if (videoTrack) {
+              transceiver.sender.replaceTrack(videoTrack).catch(console.warn);
+            }
+            transceiver.direction = "sendrecv";
+          }
+        });
+
+        // 3. Create answer and send back
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
@@ -269,14 +365,15 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     );
 
     socket.on("webrtc:answer", async ({ fromUserId, sdp }) => {
-      const pc = peerConnections.current.get(fromUserId);
+      const pc = peerConnections.current.get(String(fromUserId));
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        syncPeerStream(pc, fromUserId, updatePeer);
       }
     });
 
     socket.on("webrtc:ice-candidate", async ({ fromUserId, candidate }) => {
-      const pc = peerConnections.current.get(fromUserId);
+      const pc = peerConnections.current.get(String(fromUserId));
       if (pc && candidate) {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -287,30 +384,51 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     });
 
     // On media state change, rebuild peer stream with fresh reference
-    // so video element re-attaches and shows updated track
     socket.on(
       "meeting:media-state-changed",
       ({ userId, isMuted: remoteMuted, isVideoOn: remoteVideoOn }) => {
-        const existingPeer = useMeetingStore
-          .getState()
-          .peers.find((p) => p.userId === userId);
+        const uIdStr = String(userId);
+        const pc = peerConnections.current.get(uIdStr);
 
-        let freshStream: MediaStream | undefined;
-
-        if (existingPeer?.stream) {
-          freshStream = new MediaStream();
-          existingPeer.stream.getTracks().forEach((track) => {
-            freshStream!.addTrack(track);
+        const freshStream = new MediaStream();
+        if (pc) {
+          pc.getReceivers().forEach((r) => {
+            if (
+              r.track &&
+              r.track.readyState !== "ended" &&
+              !freshStream.getTracks().some((t) => t.id === r.track.id)
+            ) {
+              freshStream.addTrack(r.track);
+            }
           });
         }
 
         updatePeer(userId, {
           isMuted: remoteMuted,
           isVideoOn: remoteVideoOn,
-          ...(freshStream ? { stream: freshStream } : {}),
+          ...(freshStream.getTracks().length > 0 ? { stream: freshStream } : {}),
         });
       }
     );
+
+    // Screen share started: update store and re-sync presenter stream instantly
+    socket.on("meeting:screen-share-started", ({ userId }: { userId: string }) => {
+      useMeetingStore.getState().setScreenSharingUserId(userId);
+      const uIdStr = String(userId);
+      const pc = peerConnections.current.get(uIdStr);
+      if (pc) {
+        syncPeerStream(pc, userId, updatePeer);
+        updatePeer(userId, { isVideoOn: true });
+      }
+    });
+
+    // Screen share stopped: update store and re-sync all peer streams
+    socket.on("meeting:screen-share-stopped", () => {
+      useMeetingStore.getState().setScreenSharingUserId(null);
+      peerConnections.current.forEach((pc, peerId) => {
+        syncPeerStream(pc, peerId, updatePeer);
+      });
+    });
 
     return () => {
       socket.off("meeting:joined");
@@ -320,6 +438,8 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       socket.off("webrtc:answer");
       socket.off("webrtc:ice-candidate");
       socket.off("meeting:media-state-changed");
+      socket.off("meeting:screen-share-started");
+      socket.off("meeting:screen-share-stopped");
     };
   }, [
     socket,
@@ -330,7 +450,6 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     isVideoOn,
     startLocalStream,
     callPeer,
-    createPeerConnection,
     addPeer,
     removePeer,
     updatePeer,
@@ -345,48 +464,65 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   // Stop screen share and restore camera track
   const stopScreenShare = useCallback(async () => {
     try {
-      // Stop screen tracks
       screenStreamRef.current?.getTracks().forEach((track) => track.stop());
       screenStreamRef.current = null;
 
       const currentStream = useMeetingStore.getState().localStream;
-
-      // Remove all video tracks from local stream
+      const freshStream = new MediaStream();
       if (currentStream) {
+        currentStream.getAudioTracks().forEach((track) => {
+          freshStream.addTrack(track);
+        });
         currentStream.getVideoTracks().forEach((track) => {
           track.stop();
-          currentStream.removeTrack(track);
         });
       }
 
-      // Restore camera only if it was on before screen share
+      let restoredTrack: MediaStreamTrack | null = null;
+
       if (wasVideoOnRef.current) {
-        const cameraStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-        });
-        const cameraTrack = cameraStream.getVideoTracks()[0];
-
-        if (currentStream) {
-          currentStream.addTrack(cameraTrack);
+        try {
+          const cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+          });
+          restoredTrack = cameraStream.getVideoTracks()[0];
+          freshStream.addTrack(restoredTrack);
+          useMeetingStore.getState().setIsVideoOn(true);
+        } catch (e) {
+          console.warn("Failed to restore camera after screen share:", e);
+          useMeetingStore.getState().setIsVideoOn(false);
         }
-
-        videoSendersRef.current.forEach((sender) => {
-          sender.replaceTrack(cameraTrack);
-        });
       } else {
-        videoSendersRef.current.forEach((sender) => {
-          sender.replaceTrack(null);
-        });
+        useMeetingStore.getState().setIsVideoOn(false);
       }
+
+      // Update video track on all peer connections
+      peerConnections.current.forEach((pc, peerId) => {
+        const videoSender = getVideoSender(pc);
+        if (videoSender) {
+          videoSender.replaceTrack(restoredTrack).catch((err) => {
+            console.warn(`replaceTrack error on restore for peer ${peerId}:`, err);
+          });
+        }
+      });
+
+      setLocalStream(freshStream);
+
+      const isCurrentMuted = useMeetingStore.getState().isMuted;
+      const isCurrentVideoOn = useMeetingStore.getState().isVideoOn;
+      socket?.emit("meeting:media-state", {
+        meetingId,
+        isMuted: isCurrentMuted,
+        isVideoOn: isCurrentVideoOn,
+      });
     } catch (error) {
       console.error("Failed to stop screen share:", error);
     }
-  }, []);
+  }, [socket, meetingId, setLocalStream]);
 
   // Start screen sharing and replace video track on all peers
   const startScreenShare = useCallback(async () => {
     const state = useMeetingStore.getState();
-    // Remember current camera state so we can restore later
     wasVideoOnRef.current = state.isVideoOn;
 
     try {
@@ -398,20 +534,29 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       const screenTrack = screenStream.getVideoTracks()[0];
       screenStreamRef.current = screenStream;
 
-      // Replace video track on all peer connections
-      videoSendersRef.current.forEach((sender) => {
-        sender.replaceTrack(screenTrack);
+      // Replace video track across ALL connected peers
+      peerConnections.current.forEach((pc, peerId) => {
+        const videoSender = getVideoSender(pc);
+        if (videoSender) {
+          videoSender.replaceTrack(screenTrack).catch((err) => {
+            console.warn(`replaceTrack error for peer ${peerId}:`, err);
+          });
+        }
       });
 
-      // Replace video track on local stream so local preview shows screen
+      // Update local stream with screen track so local preview shows screen
       const currentStream = state.localStream;
+      const freshStream = new MediaStream();
       if (currentStream) {
+        currentStream.getAudioTracks().forEach((track) => {
+          freshStream.addTrack(track);
+        });
         currentStream.getVideoTracks().forEach((track) => {
           track.stop();
-          currentStream.removeTrack(track);
         });
-        currentStream.addTrack(screenTrack);
       }
+      freshStream.addTrack(screenTrack);
+      setLocalStream(freshStream);
 
       // Handle native browser "Stop sharing" button
       screenTrack.onended = async () => {
@@ -421,18 +566,24 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
         socket?.emit("meeting:screen-share-stopped", { meetingId });
       };
 
+      // Notify room about media state
+      socket?.emit("meeting:media-state", {
+        meetingId,
+        isMuted: state.isMuted,
+        isVideoOn: true,
+      });
+
       return screenStream;
     } catch (error) {
       console.error("Failed to start screen share:", error);
       throw error;
     }
-  }, [stopScreenShare, socket, meetingId]);
+  }, [stopScreenShare, socket, meetingId, setLocalStream]);
 
   // Close all peer connections and stop streams
   const closeAllPeers = useCallback(() => {
     peerConnections.current.forEach((pc) => pc.close());
     peerConnections.current.clear();
-    videoSendersRef.current.clear();
     screenStreamRef.current?.getTracks().forEach((track) => track.stop());
     screenStreamRef.current = null;
   }, []);

@@ -54,19 +54,37 @@ export const useMeetingStore = create<MeetingState>((set) => ({
     setLocalStream: (stream) => set({ localStream: stream }),
     setPeers: (peers) => set({ peers }),
 
-    addPeer: (peer) => set((state) => ({ peers: [...state.peers, peer] })),
+    addPeer: (peer) =>
+        set((state) => {
+            const peerIdStr = String(peer.userId);
+            const exists = state.peers.some((p) => String(p.userId) === peerIdStr);
+            if (exists) {
+                return {
+                    peers: state.peers.map((p) =>
+                        String(p.userId) === peerIdStr ? { ...p, ...peer, userId: peerIdStr } : p
+                    ),
+                };
+            }
+            return { peers: [...state.peers, { ...peer, userId: peerIdStr }] };
+        }),
 
     updatePeer: (userId, updates) =>
-        set((state) => ({
-            peers: state.peers.map((p) =>
-                p.userId === userId ? { ...p, ...updates } : p
-            ),
-        })),
+        set((state) => {
+            const targetId = String(userId);
+            return {
+                peers: state.peers.map((p) =>
+                    String(p.userId) === targetId ? { ...p, ...updates } : p
+                ),
+            };
+        }),
 
     removePeer: (userId) =>
-        set((state) => ({
-            peers: state.peers.filter((p) => p.userId !== userId),
-        })),
+        set((state) => {
+            const targetId = String(userId);
+            return {
+                peers: state.peers.filter((p) => String(p.userId) !== targetId),
+            };
+        }),
 
     setIsMuted: (val) => set({ isMuted: val }),
     setIsVideoOn: (val) => set({ isVideoOn: val }),
@@ -96,7 +114,8 @@ export const useMeetingStore = create<MeetingState>((set) => ({
                 ? recordingStartTime || Date.now()
                 : null,
         }),
-    setScreenSharingUserId: (userId) => set({ screenSharingUserId: userId }),
+    setScreenSharingUserId: (userId) =>
+        set({ screenSharingUserId: userId ? String(userId) : null }),
 
     resetMeeting: () =>
         set({

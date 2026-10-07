@@ -124,7 +124,7 @@ export function ChatPanel({
           <div className="flex items-start gap-2 pt-0.5">
             <Info className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
             <p className="text-[11px] leading-tight">
-              Messages are only visible to participants currently in this call.
+              Messages are only visible to members currently in this call.
             </p>
           </div>
           <button
