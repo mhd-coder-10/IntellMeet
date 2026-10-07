@@ -267,7 +267,7 @@ export default function Dashboard() {
                     Start New Meeting
                   </h3>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Instant video call with screen sharing, participant grid, and MP4 composite recording.
+                    Instant video call with screen sharing, member grid, and MP4 composite recording.
                   </p>
                 </div>
               </CardContent>
@@ -369,9 +369,13 @@ export default function Dashboard() {
                           <h3 className="font-bold text-slate-900 text-base truncate max-w-[200px] sm:max-w-xs">
                             {meeting.title}
                           </h3>
-                          {isHost && (
-                            <span className="px-2 py-0.5 rounded text-[10px] bg-blue-50 text-blue-700 border border-blue-200 font-semibold">
+                          {isHost ? (
+                            <span className="px-2 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700 border border-amber-200 font-semibold">
                               Host
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[10px] bg-blue-50 text-blue-700 border border-blue-200 font-medium">
+                              Member
                             </span>
                           )}
                         </div>

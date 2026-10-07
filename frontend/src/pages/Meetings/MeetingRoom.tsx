@@ -17,12 +17,14 @@ import {
   joinMeeting,
   leaveMeeting,
   endMeeting,
+  uploadMeetingRecording,
 } from "@/services/meetingService";
 import { VideoTile } from "@/components/Meetings/VideoTile";
 import { MeetingControls } from "@/components/Meetings/MeetingControls";
 import { ChatPanel } from "@/components/Chat/ChatPanel";
 import { RecordConsentModal } from "@/components/Meetings/RecordConsentModal";
 import { RecordingPreviewModal } from "@/components/Meetings/RecordingPreviewModal";
+import { RecordStopConfirmModal } from "@/components/Meetings/RecordStopConfirmModal";
 import { Button } from "@/components/ui/button";
 import { playRecordingStartChime, playRecordingStopChime } from "@/utils/meetingChime";
 
@@ -44,6 +46,8 @@ export default function MeetingRoom() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [isStopConfirmModalOpen, setIsStopConfirmModalOpen] = useState(false);
+  const [isSavingRecording, setIsSavingRecording] = useState(false);
   const [remoteRecordingTime, setRemoteRecordingTime] = useState(0);
 
   const { socket, isConnected } = useSocket();
@@ -63,6 +67,7 @@ export default function MeetingRoom() {
     setIsScreenSharing,
     setRecordingState,
     setScreenSharingUserId,
+    updatePeer,
     resetMeeting,
   } = useMeetingStore();
 
@@ -106,9 +111,12 @@ export default function MeetingRoom() {
     stopRecording,
     pauseRecording,
     resumeRecording,
-    downloadRecording,
     clearRecordedResult,
+    isRecorderActive,
   } = useCompositeRecording();
+
+  const isEndingMeetingRef = useRef(false);
+  const isLeavingMeetingRef = useRef(false);
 
   // Set current meeting id and call join API
   useEffect(() => {
@@ -175,12 +183,14 @@ export default function MeetingRoom() {
       message: string;
     }) => {
       if (data.meetingId === id) {
-        toast.error(data.message || "Meeting has been ended by the host");
+        if (isEndingMeetingRef.current) return;
+        toast.info(data.message || "Meeting has been ended by the host");
         stopLocalStream();
         closeAllPeers();
         resetMeeting();
+        await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
         await queryClient.invalidateQueries({ queryKey: ["meetings"] });
-        navigate(`/meetings/${id}/details`);
+        navigate(`/meetings/${id}/details`, { replace: true });
       }
     };
 
@@ -216,13 +226,16 @@ export default function MeetingRoom() {
       }
     };
 
-    const handleScreenStart = ({ userId }: { userId: string }) => {
+    const handleScreenStart = ({ userId, name }: { userId: string; name?: string }) => {
       setScreenSharingUserId(userId);
-      toast.info("Someone started screen sharing");
+      if (!user?.id || String(userId) !== String(user.id)) {
+        toast.info(`${name || "Someone"} started screen sharing`);
+      }
     };
 
     const handleScreenStop = () => {
       setScreenSharingUserId(null);
+      toast.info("Screen sharing ended");
     };
 
     const handleRecordStart = (data: {
@@ -258,16 +271,34 @@ export default function MeetingRoom() {
   }, [socket, setScreenSharingUserId, setRecordingState]);
 
   const handleLeave = async () => {
+    if (isLeavingMeetingRef.current || isEndingMeetingRef.current) return;
+    isLeavingMeetingRef.current = true;
+
     if (isScreenSharing) {
       await stopScreenShare();
     }
 
-    if (isRecording) {
-      const result = await stopRecording();
-      setRecordingState(false);
-      socket?.emit("meeting:recording-stopped", { meetingId: id });
-      if (result) {
-        downloadRecording(result);
+    const shouldSaveRecording = isHost && (isRecording || isRecorderActive());
+    if (shouldSaveRecording) {
+      const toastId = toast.loading("Saving meeting recording... Please wait.");
+      try {
+        const result = await stopRecording(true);
+        clearRecordedResult();
+        setRecordingState(false);
+        socket?.emit("meeting:recording-stopped", { meetingId: id });
+        if (result && id) {
+          await uploadMeetingRecording(id, result.blob, {
+            title: `${meeting?.title || "Meeting"} - Recording`,
+            duration: result.duration,
+            size: result.size,
+          });
+          toast.success("Recording saved to Meeting Details!", { id: toastId });
+        } else {
+          toast.dismiss(toastId);
+        }
+      } catch (err) {
+        console.error("Auto upload recording on leave:", err);
+        toast.error("Failed to save recording", { id: toastId });
       }
     }
 
@@ -284,27 +315,47 @@ export default function MeetingRoom() {
     closeAllPeers();
     resetMeeting();
 
+    if (id) {
+      await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
+    }
     await queryClient.invalidateQueries({ queryKey: ["meetings"] });
-    navigate("/meetings");
+    navigate(isHost ? `/meetings/${id}/details` : "/meetings", { replace: true });
   };
 
   const handleEndMeeting = async () => {
-    if (!id) return;
+    if (!id || isEndingMeetingRef.current) return;
+    isEndingMeetingRef.current = true;
 
     if (isScreenSharing) {
       await stopScreenShare();
     }
 
-    if (isRecording) {
-      const result = await stopRecording();
-      setRecordingState(false);
-      socket?.emit("meeting:recording-stopped", { meetingId: id });
-      if (result) {
-        downloadRecording(result);
+    const shouldSaveRecording = isRecording || isRecorderActive();
+    if (shouldSaveRecording) {
+      const toastId = toast.loading("Saving meeting recording... Please wait.");
+      try {
+        const result = await stopRecording(true);
+        clearRecordedResult();
+        setRecordingState(false);
+        socket?.emit("meeting:recording-stopped", { meetingId: id });
+        if (result && id) {
+          await uploadMeetingRecording(id, result.blob, {
+            title: `${meeting?.title || "Meeting"} - Recording`,
+            duration: result.duration,
+            size: result.size,
+          });
+          toast.success("Recording saved to Meeting Details!", { id: toastId });
+        } else {
+          toast.dismiss(toastId);
+        }
+      } catch (err) {
+        console.error("Auto upload recording on end:", err);
+        toast.error("Failed to save recording", { id: toastId });
       }
     }
 
     try {
+      socket?.emit("meeting:end", { meetingId: id });
       socket?.emit("meeting:leave", { meetingId: id });
       await endMeeting(id);
       toast.success("Meeting ended");
@@ -317,8 +368,9 @@ export default function MeetingRoom() {
     closeAllPeers();
     resetMeeting();
 
+    await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
     await queryClient.invalidateQueries({ queryKey: ["meetings"] });
-    navigate("/meetings");
+    navigate(`/meetings/${id}/details`, { replace: true });
   };
 
   // Toggle screen sharing on/off
@@ -344,17 +396,51 @@ export default function MeetingRoom() {
   // Toggle composite recording on/off (host only)
   const handleToggleRecording = () => {
     if (isRecording) {
-      stopRecording().then((result) => {
-        setRecordingState(false);
-        socket?.emit("meeting:recording-stopped", { meetingId: id });
-        toast.success("Recording saved");
-        if (result) {
-          setIsPreviewModalOpen(true);
-        }
-      });
+      // Show confirmation popup: Done (save captured so far) vs Continue (keep recording)
+      setIsStopConfirmModalOpen(true);
     } else {
       // Open Google Meet consent confirmation modal
       setIsConsentModalOpen(true);
+    }
+  };
+
+  // Continue recording uninterrupted
+  const handleContinueRecording = () => {
+    setIsStopConfirmModalOpen(false);
+    toast.info("Continuing meeting recording...");
+  };
+
+  // Done: Stop and save recording captured so far mid-meeting
+  const handleDoneRecording = async () => {
+    setIsSavingRecording(true);
+    const toastId = toast.loading("Saving recording...");
+    try {
+      const result = await stopRecording(true);
+      setRecordingState(false);
+      socket?.emit("meeting:recording-stopped", { meetingId: id });
+
+      if (result && id) {
+        await uploadMeetingRecording(id, result.blob, {
+          title: `${meeting?.title || "Meeting"} - Recording`,
+          duration: result.duration,
+          size: result.size,
+        });
+        await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
+        await queryClient.invalidateQueries({ queryKey: ["meetings"] });
+        toast.success(
+          "Recording saved to Meeting Details! You can start a new recording anytime.",
+          { id: toastId }
+        );
+      } else {
+        toast.dismiss(toastId);
+      }
+    } catch (err) {
+      console.error("Save recording error:", err);
+      toast.error("Failed to save recording", { id: toastId });
+    } finally {
+      setIsSavingRecording(false);
+      setIsStopConfirmModalOpen(false);
+      clearRecordedResult();
     }
   };
 
@@ -373,26 +459,51 @@ export default function MeetingRoom() {
 
   // Redirect to Details if meeting has concluded
   useEffect(() => {
+    if (isEndingMeetingRef.current || isLeavingMeetingRef.current) return;
     if (meeting?.status === "completed" || meeting?.status === "cancelled") {
       toast.info("This meeting has concluded. Viewing details.");
       navigate(`/meetings/${id}/details`, { replace: true });
     }
   }, [meeting?.status, id, navigate]);
 
-  const isAnyScreenSharing =
+  const isLocalSharing = Boolean(
     isScreenSharing ||
-    (!!screenSharingUserId && peers.some((p) => p.userId === screenSharingUserId));
+      (screenSharingUserId && user?.id && String(screenSharingUserId) === String(user.id)) ||
+      screenSharingUserId === "local"
+  );
 
-  const screenPresenter = isScreenSharing
-    ? { name: user?.name || "You", stream: localStream, isLocal: true }
-    : screenSharingUserId
+  const isAnyScreenSharing = Boolean(isLocalSharing || screenSharingUserId);
+
+  const presenterPeer =
+    !isLocalSharing && screenSharingUserId
+      ? peers.find(
+          (p) =>
+            String(p.userId) === String(screenSharingUserId) ||
+            p.userId === screenSharingUserId
+        )
+      : null;
+
+  const hostUserId = (meeting?.host?._id || meeting?.host)?.toString();
+  const isPresenterHost = isLocalSharing
+    ? isHost
+    : presenterPeer
+    ? hostUserId === presenterPeer.userId?.toString()
+    : hostUserId === screenSharingUserId?.toString();
+
+  const presenterName = isLocalSharing
+    ? user?.name || (isHost ? "Host" : "Member")
+    : presenterPeer?.name || (isPresenterHost ? "Host" : "Member");
+
+  const presenterStream = isLocalSharing
+    ? localStream
+    : presenterPeer?.stream || null;
+
+  const screenPresenter = isAnyScreenSharing
     ? {
-        name:
-          peers.find((p) => p.userId === screenSharingUserId)?.name ||
-          "Participant",
-        stream:
-          peers.find((p) => p.userId === screenSharingUserId)?.stream || null,
-        isLocal: false,
+        name: presenterName,
+        stream: presenterStream,
+        isLocal: isLocalSharing,
+        isHost: isPresenterHost,
       }
     : null;
 
@@ -416,7 +527,7 @@ export default function MeetingRoom() {
         <div className="flex items-center gap-3 text-sm text-gray-400">
           <div className="flex items-center gap-1.5 bg-gray-800/60 px-2.5 py-1 rounded-full text-xs">
             <Users className="h-3.5 w-3.5 text-gray-400" />
-            <span>{peers.length + 1}</span>
+            <span>{peers.length + 1} {peers.length === 0 ? "Member" : "Members"}</span>
           </div>
 
           <span className="text-xs font-mono bg-gray-800/80 text-gray-300 px-2.5 py-1 rounded border border-gray-700/50">
@@ -458,61 +569,89 @@ export default function MeetingRoom() {
       </div>
 
       {/* Main Video Room Layout */}
-      {/* Main Video Room Layout */}
       <div className="flex-1 flex overflow-hidden">
         {isAnyScreenSharing && screenPresenter ? (
-          /* Screen Sharing View: Large Primary Screen Stage + Right Column Filmstrip */
-          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden p-3 gap-3">
+          /* Screen Sharing View: Large Primary Screen Stage + Bottom Horizontal Row */
+          <div className="flex-1 flex flex-col overflow-hidden p-3 gap-3">
             {/* Primary Large Screen Share Stage */}
-            <div className="flex-1 h-full min-h-[300px] bg-black/95 rounded-2xl overflow-hidden border border-gray-800 shadow-2xl relative flex items-center justify-center">
+            <div className="flex-1 min-h-0 bg-black/95 rounded-2xl overflow-hidden border border-gray-800 shadow-2xl relative flex items-center justify-center">
               <div className="absolute top-3 left-4 z-20 flex items-center gap-2 bg-black/75 backdrop-blur-md text-white text-xs px-3.5 py-1.5 rounded-full border border-gray-700/60 shadow-lg select-none">
                 <Monitor className="w-4 h-4 text-blue-400 animate-pulse" />
                 <span>
-                  <strong className="text-blue-300">{screenPresenter.name}</strong> is presenting screen
+                  <strong className="text-blue-300">{screenPresenter.name}</strong>{" "}
+                  <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded border ${
+                    screenPresenter.isHost
+                      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                      : "bg-blue-500/20 text-blue-300 border-blue-500/30"
+                  }`}>
+                    {screenPresenter.isHost ? "Host" : "Member"}
+                  </span>{" "}
+                  is presenting screen
                 </span>
               </div>
 
               <VideoTile
                 stream={screenPresenter.stream}
                 name={screenPresenter.name}
+                profilePicture={isLocalSharing ? user?.profilePicture : presenterPeer?.profilePicture}
                 isLocal={screenPresenter.isLocal}
                 isScreenSharing
+                isHost={screenPresenter.isHost}
                 className="w-full h-full object-contain"
               />
             </div>
 
-            {/* Right Column Filmstrip for Participants */}
-            <div className="w-full lg:w-72 xl:w-80 flex-shrink-0 flex flex-row lg:flex-col gap-3 overflow-x-auto lg:overflow-y-auto p-2 bg-gray-900/60 border border-gray-800/80 rounded-2xl scrollbar-thin">
-              <div className="hidden lg:flex items-center justify-between text-[11px] font-semibold text-gray-400 px-1 uppercase tracking-wider select-none">
-                <span>In Call ({peers.length + 1})</span>
-              </div>
-
+            {/* Bottom Single Horizontal Row for Members */}
+            <div className="h-32 sm:h-36 md:h-40 shrink-0 flex items-center gap-3 overflow-x-auto p-2 bg-gray-900/60 border border-gray-800/80 rounded-2xl scrollbar-thin">
               {/* Local user tile (when remote peer is presenting) */}
-              {!isScreenSharing && (
-                <div className="w-48 lg:w-full shrink-0 aspect-video rounded-xl overflow-hidden shadow-md border border-gray-800/80">
+              {!isLocalSharing && (
+                <div className="h-full aspect-video shrink-0 rounded-xl overflow-hidden shadow-md border border-gray-800/80">
                   <VideoTile
                     stream={localStream}
                     name={user?.name || "You"}
+                    profilePicture={user?.profilePicture}
                     isMuted={isMuted}
                     isVideoOn={isVideoOn}
                     isLocal
+                    isHost={isHost}
+                  />
+                </div>
+              )}
+
+              {/* Local user tile as presenter (shows camera/avatar in bottom row while presenting) */}
+              {isLocalSharing && (
+                <div className="h-full aspect-video shrink-0 rounded-xl overflow-hidden shadow-md border border-blue-500/40 ring-1 ring-blue-500/30">
+                  <VideoTile
+                    stream={localStream}
+                    name={user?.name || "You"}
+                    profilePicture={user?.profilePicture}
+                    isMuted={isMuted}
+                    isVideoOn={isVideoOn}
+                    isLocal
+                    isHost={isHost}
                   />
                 </div>
               )}
 
               {/* Other remote peers */}
               {peers
-                .filter((p) => p.userId !== screenSharingUserId)
+                .filter(
+                  (p) =>
+                    !screenSharingUserId ||
+                    String(p.userId) !== String(screenSharingUserId)
+                )
                 .map((peer) => (
                   <div
                     key={peer.userId}
-                    className="w-48 lg:w-full shrink-0 aspect-video rounded-xl overflow-hidden shadow-md border border-gray-800/80"
+                    className="h-full aspect-video shrink-0 rounded-xl overflow-hidden shadow-md border border-gray-800/80"
                   >
                     <VideoTile
                       stream={peer.stream || null}
                       name={peer.name}
+                      profilePicture={peer.profilePicture}
                       isMuted={peer.isMuted}
                       isVideoOn={peer.isVideoOn}
+                      isHost={(meeting?.host?._id || meeting?.host)?.toString() === peer.userId?.toString()}
                     />
                   </div>
                 ))}
@@ -525,10 +664,12 @@ export default function MeetingRoom() {
               <VideoTile
                 stream={localStream}
                 name={user?.name || "You"}
+                profilePicture={user?.profilePicture}
                 isMuted={isMuted}
                 isVideoOn={isVideoOn}
                 isLocal
-                isScreenSharing={isScreenSharing}
+                isHost={isHost}
+                isScreenSharing={isLocalSharing}
               />
 
               {peers.map((peer) => (
@@ -536,16 +677,21 @@ export default function MeetingRoom() {
                   key={peer.userId}
                   stream={peer.stream || null}
                   name={peer.name}
+                  profilePicture={peer.profilePicture}
                   isMuted={peer.isMuted}
                   isVideoOn={peer.isVideoOn}
-                  isScreenSharing={screenSharingUserId === peer.userId}
+                  isHost={meeting?.host?._id === peer.userId}
+                  isScreenSharing={Boolean(
+                    screenSharingUserId &&
+                      String(screenSharingUserId) === String(peer.userId)
+                  )}
                 />
               ))}
             </div>
 
             {peers.length === 0 && (
               <div className="text-center text-gray-400 mt-12">
-                <p className="text-base text-gray-300">Waiting for others to join...</p>
+                <p className="text-base text-gray-300">Waiting for other members to join...</p>
                 <p className="text-sm mt-2 text-gray-400">
                   Share meeting code:{" "}
                   <span className="font-mono font-bold text-blue-400 select-all">
@@ -594,6 +740,16 @@ export default function MeetingRoom() {
         meetingTitle={meeting?.title}
       />
 
+      {/* Mid-Meeting Stop & Save Confirmation Modal (Done vs Continue) */}
+      <RecordStopConfirmModal
+        isOpen={isStopConfirmModalOpen}
+        onContinue={handleContinueRecording}
+        onDone={handleDoneRecording}
+        recordingTime={recordingTime}
+        meetingTitle={meeting?.title}
+        isSaving={isSavingRecording}
+      />
+
       {/* Google Meet Recording Saved & Video Preview Modal */}
       <RecordingPreviewModal
         isOpen={isPreviewModalOpen}
@@ -602,7 +758,6 @@ export default function MeetingRoom() {
           clearRecordedResult();
         }}
         result={recordedResult}
-        onDownload={() => downloadRecording()}
         meetingTitle={meeting?.title}
         meetingId={id}
       />

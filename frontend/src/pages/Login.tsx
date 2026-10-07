@@ -19,7 +19,7 @@ export default function Login() {
                 </div>
                 <div className="flex flex-col">
                     <span className="text-xl font-bold tracking-tight text-slate-900 leading-tight">
-                        Intelli<span className="text-blue-600">Meet</span>
+                        Intell<span className="text-blue-600">Meet</span>
                     </span>
                     <span className="text-[10px] text-slate-400 font-medium tracking-wide">
                         Enterprise Video Collaboration

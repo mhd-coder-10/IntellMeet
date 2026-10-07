@@ -229,11 +229,17 @@ const uploadMeetingRecording = async (req, res) => {
     try {
         const recordingUrl = req.body.recordingUrl;
         const file = req.file;
+        const metadata = {
+            title: req.body.title,
+            duration: req.body.duration ? Number(req.body.duration) : undefined,
+            size: req.body.size ? Number(req.body.size) : undefined,
+        };
         const data = await meetingService.uploadMeetingRecording(
             req.params.id,
             req.user.id,
             file,
-            recordingUrl
+            recordingUrl,
+            metadata
         );
         res.status(200).json({
             success: true,

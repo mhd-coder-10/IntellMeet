@@ -53,13 +53,17 @@ export const deleteMeeting = async (id: string): Promise<void> => {
 
 export const uploadMeetingRecording = async (
     id: string,
-    blobOrFormData: Blob | FormData | { recordingUrl: string }
+    blobOrFormData: Blob | FormData | { recordingUrl: string },
+    metadata?: { title?: string; duration?: number; size?: number }
 ): Promise<{ meeting: Meeting; recordingUrl: string }> => {
     let payload: FormData | { recordingUrl: string };
 
     if (blobOrFormData instanceof Blob) {
         const fd = new FormData();
         fd.append("recording", blobOrFormData, `recording-${id}-${Date.now()}.webm`);
+        if (metadata?.title) fd.append("title", metadata.title);
+        if (metadata?.duration !== undefined) fd.append("duration", metadata.duration.toString());
+        if (metadata?.size !== undefined) fd.append("size", metadata.size.toString());
         payload = fd;
     } else {
         payload = blobOrFormData;

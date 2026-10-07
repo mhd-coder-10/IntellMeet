@@ -8,6 +8,15 @@ export interface MeetingParticipant {
     profilePicture?: string
 }
 
+export interface MeetingRecordingItem {
+    _id?: string
+    url: string
+    title: string
+    duration?: number
+    size?: number
+    createdAt?: string
+}
+
 export interface Meeting {
     _id: string
     title: string
@@ -19,6 +28,7 @@ export interface Meeting {
     startedAt?: string | null
     endedAt?: string | null
     recordingUrl?: string
+    recordings?: MeetingRecordingItem[]
     isRecording?: boolean
     recordingDeletedByHost?: boolean
     isHostDeleted?: boolean

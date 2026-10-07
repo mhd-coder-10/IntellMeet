@@ -38,13 +38,28 @@ const registerMeetingHandlers = (io, socket) => {
 
       roomManager.addUserToRoom(meetingId, socket.user.id, socket.id, userInfo);
 
-      const isHost = meeting.host.toString() === socket.user.id;
-      const alreadyParticipant = meeting.participants.some(
-        (p) => p.toString() === socket.user.id
+      const hostId = (meeting.host?._id || meeting.host)?.toString();
+      const isHost = hostId === socket.user.id.toString();
+      const alreadyParticipant = (meeting.participants || []).some(
+        (p) => (p?._id || p)?.toString() === socket.user.id.toString()
       );
 
       if (!isHost && !alreadyParticipant) {
         await meetingRepo.addParticipant(meetingId, socket.user.id);
+        try {
+          const userRepo = require("../repositories/userRepository");
+          const user = await userRepo.findById(socket.user.id);
+          if (user) {
+            const exists = (user.attendedMeetings || []).find(
+              (a) => a.meeting?.toString() === meetingId.toString()
+            );
+            if (!exists) {
+              await userRepo.addAttendedMeeting(socket.user.id, meetingId);
+            }
+          }
+        } catch (uErr) {
+          console.warn("User attendance record error:", uErr.message);
+        }
       }
 
       const users = roomManager.getRoomUsers(meetingId);
@@ -79,7 +94,7 @@ const registerMeetingHandlers = (io, socket) => {
             recipient: meeting.host,
             sender: socket.user.id,
             type: "system",
-            title: "Participant Joined",
+            title: "Member Joined",
             message: `${socket.user.name} joined your meeting "${meeting.title}"`,
             link: `/meetings/${meetingId}`,
           });
@@ -101,15 +116,19 @@ const registerMeetingHandlers = (io, socket) => {
       const meetingRepo = require("../repositories/meetingRepository");
       const meeting = await meetingRepo.findById(meetingId);
 
-      if (meeting && meeting.host.toString() !== socket.user.id) {
-        await meetingRepo.removeParticipant(meetingId, socket.user.id);
-
+      const hostId = (meeting.host?._id || meeting.host)?.toString();
+      if (meeting && hostId !== socket.user.id.toString()) {
+        try {
+          const userRepo = require("../repositories/userRepository");
+          await userRepo.updateAttendedMeeting(socket.user.id, meetingId);
+        } catch (err) {}
+        // Preserve participant in meeting attendance history
         try {
           await notificationService.createNotification({
             recipient: meeting.host,
             sender: socket.user.id,
             type: "system",
-            title: "Participant Left",
+            title: "Member Left",
             message: `${socket.user.name} left your meeting "${meeting.title}"`,
             link: `/meetings/${meetingId}`,
           });
@@ -119,8 +138,14 @@ const registerMeetingHandlers = (io, socket) => {
       }
 
       socket.leave(meetingId);
-      roomManager.removeUserFromRoom(meetingId, socket.user.id);
+      const leaveResult = roomManager.removeUserFromRoom(meetingId, socket.user.id);
       socket.meetingId = null;
+
+      if (leaveResult?.wasScreenSharing) {
+        io.to(meetingId).emit("meeting:screen-share-stopped", {
+          userId: socket.user.id,
+        });
+      }
 
       io.to(meetingId).emit("meeting:user-left", {
         userId: socket.user.id,
@@ -150,24 +175,24 @@ const registerMeetingHandlers = (io, socket) => {
     }
   });
 
-  // Broadcast screen share start to other participants
+  // Broadcast screen share start to all participants in meeting room
   socket.on("meeting:screen-share-started", ({ meetingId }) => {
     if (!meetingId) return;
     roomManager.setScreenSharingUser(meetingId, socket.user.id);
 
-    socket.to(meetingId).emit("meeting:screen-share-started", {
+    io.to(meetingId).emit("meeting:screen-share-started", {
       userId: socket.user.id,
       username: socket.user.username,
       name: socket.user.name,
     });
   });
 
-  // Broadcast screen share stop to other participants
+  // Broadcast screen share stop to all participants in meeting room
   socket.on("meeting:screen-share-stopped", ({ meetingId }) => {
     if (!meetingId) return;
     roomManager.clearScreenSharingUser(meetingId);
 
-    socket.to(meetingId).emit("meeting:screen-share-stopped", {
+    io.to(meetingId).emit("meeting:screen-share-stopped", {
       userId: socket.user.id,
     });
   });
@@ -193,6 +218,16 @@ const registerMeetingHandlers = (io, socket) => {
     });
   });
 
+  // Handle host ending meeting via socket
+  socket.on("meeting:end", async ({ meetingId }) => {
+    if (!meetingId) return;
+    io.to(meetingId).emit("meeting:ended", {
+      meetingId,
+      message: "Meeting has been ended by the host",
+    });
+    io.in(meetingId).socketsLeave(meetingId);
+  });
+
   // Meeting disconnect handler to clean up DB and notify host
   socket.on("disconnect", async () => {
     const meetingId = socket.meetingId;
@@ -202,15 +237,19 @@ const registerMeetingHandlers = (io, socket) => {
         const meetingRepo = require("../repositories/meetingRepository");
         const meeting = await meetingRepo.findById(meetingId);
 
-        if (meeting && meeting.host.toString() !== socket.user.id) {
-          await meetingRepo.removeParticipant(meetingId, socket.user.id);
-
+        const hostId = (meeting.host?._id || meeting.host)?.toString();
+        if (meeting && hostId !== socket.user.id.toString()) {
+          try {
+            const userRepo = require("../repositories/userRepository");
+            await userRepo.updateAttendedMeeting(socket.user.id, meetingId);
+          } catch (err) {}
+          // Preserve participant in meeting attendance history
           try {
             await notificationService.createNotification({
               recipient: meeting.host,
               sender: socket.user.id,
               type: "system",
-              title: "Participant Left",
+              title: "Member Left",
               message: `${socket.user.name} left your meeting "${meeting.title}"`,
               link: `/meetings/${meetingId}`,
             });
@@ -222,7 +261,13 @@ const registerMeetingHandlers = (io, socket) => {
         console.log("Disconnect cleanup error:", err.message);
       }
 
-      roomManager.removeUserFromRoom(meetingId, socket.user.id);
+      const disconnectResult = roomManager.removeUserFromRoom(meetingId, socket.user.id);
+
+      if (disconnectResult?.wasScreenSharing) {
+        io.to(meetingId).emit("meeting:screen-share-stopped", {
+          userId: socket.user.id,
+        });
+      }
 
       io.to(meetingId).emit("meeting:user-left", {
         userId: socket.user.id,

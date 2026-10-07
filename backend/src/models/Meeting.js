@@ -64,6 +64,30 @@ const meetingSchema = new mongoose.Schema(
             type: String,
             default: "",
         },
+        recordings: [
+            {
+                url: {
+                    type: String,
+                    required: true,
+                },
+                title: {
+                    type: String,
+                    default: "",
+                },
+                duration: {
+                    type: Number,
+                    default: 0,
+                },
+                size: {
+                    type: Number,
+                    default: 0,
+                },
+                createdAt: {
+                    type: Date,
+                    default: Date.now,
+                },
+            },
+        ],
         recordingDeletedByHost: {
             type: Boolean,
             default: false,

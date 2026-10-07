@@ -115,9 +115,13 @@ export function MeetingCard({ meeting }: Props) {
               <CardTitle className="text-base font-bold text-slate-900 tracking-tight line-clamp-1">
                 {meeting.title}
               </CardTitle>
-              {isHost && (
-                <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+              {isHost ? (
+                <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                   Host
+                </span>
+              ) : (
+                <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                  Member
                 </span>
               )}
             </div>
@@ -143,7 +147,7 @@ export function MeetingCard({ meeting }: Props) {
         <div className="grid grid-cols-2 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-xs">
           <div className="flex items-center gap-2 text-slate-700">
             <Users className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-            <span className="truncate">{participantCount} participant(s)</span>
+            <span className="truncate">{participantCount} {participantCount === 1 ? "member" : "members"}</span>
           </div>
 
           <div className="flex items-center gap-2 text-slate-700">

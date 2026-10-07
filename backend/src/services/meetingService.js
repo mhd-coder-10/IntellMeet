@@ -3,6 +3,7 @@
 
 const meetingRepo = require("../repositories/meetingRepository");
 const userRepo = require("../repositories/userRepository");
+const Meeting = require("../models/Meeting");
 const notificationService = require("./notificationService");
 const roomManager = require("../webrtc/roomManager");
 const { deleteMediaFile, uploadToCloudinary } = require("../utils/mediaStorage");
@@ -25,8 +26,9 @@ const generateMeetingCode = () => {
 
 const clearMeetingCaches = async (meetingId, hostId) => {
   await deleteCacheByPattern(`meeting:${meetingId}*`)
-  if (hostId) {
-    await deleteCacheByPattern(`user:${hostId}:meetings`)
+  const hostStr = (hostId?._id || hostId)?.toString();
+  if (hostStr) {
+    await deleteCacheByPattern(`user:${hostStr}:meetings`)
   }
   await deleteCacheByPattern("user:*:meetings")
 }
@@ -115,6 +117,44 @@ const getMeetingById = async (meetingId, userId = null) => {
     const error = new Error("Meeting not found")
     error.statusCode = 404
     throw error
+  }
+
+  // Ensure all users who attended or joined this meeting are present in meeting.participants
+  try {
+    const User = require("../models/User");
+    const attendedUsers = await User.find({
+      "attendedMeetings.meeting": meeting._id,
+    }).select("_id name username email profilePicture");
+
+    const hostId = (meeting.host?._id || meeting.host)?.toString();
+
+    // Ensure host is never inside participants array
+    if (meeting.participants && Array.isArray(meeting.participants)) {
+      meeting.participants = meeting.participants.filter(
+        (p) => (p?._id || p)?.toString() !== hostId
+      );
+    }
+
+    if (attendedUsers && attendedUsers.length > 0) {
+      const existingIds = new Set(
+        (meeting.participants || []).map((p) => (p._id ? p._id.toString() : p.toString()))
+      );
+      let needsDbUpdate = false;
+      for (const aUser of attendedUsers) {
+        const uId = aUser._id.toString();
+        if (hostId && uId !== hostId && !existingIds.has(uId)) {
+          await meetingRepo.addParticipant(meeting._id, aUser._id);
+          meeting.participants.push(aUser);
+          existingIds.add(uId);
+          needsDbUpdate = true;
+        }
+      }
+      if (needsDbUpdate) {
+        await clearMeetingCaches(meetingId, userId);
+      }
+    }
+  } catch (err) {
+    console.warn("Attended users lookup notice:", err.message);
   }
 
   if (
@@ -245,8 +285,14 @@ const deleteMeeting = async (meetingId, userId) => {
     throw error
   }
 
-  // 1. Permanently delete recording file from Cloudinary and local disk if present
-  if (meeting.recordingUrl) {
+  // 1. Permanently delete all recording files from Cloudinary and local disk if present
+  if (Array.isArray(meeting.recordings) && meeting.recordings.length > 0) {
+    for (const rec of meeting.recordings) {
+      if (rec?.url) {
+        await deleteMediaFile(rec.url);
+      }
+    }
+  } else if (meeting.recordingUrl) {
     await deleteMediaFile(meeting.recordingUrl);
   }
 
@@ -264,6 +310,7 @@ const deleteMeeting = async (meetingId, userId) => {
     // Mark as host-deleted and wipe recordingUrl so host will no longer see it on their dashboard.
     await meetingRepo.updateById(meetingId, {
       recordingUrl: "",
+      recordings: [],
       recordingDeletedByHost: true,
       isHostDeleted: true,
       hostDeletedAt: new Date(),
@@ -292,12 +339,13 @@ const joinMeeting = async (meetingId, userId) => {
     throw error
   }
 
-  if (meeting.host.toString() === userId.toString()) {
+  const hostId = (meeting.host?._id || meeting.host)?.toString();
+  if (hostId === userId.toString()) {
     return { meeting }
   }
 
-  const alreadyJoined = meeting.participants.some(
-    (p) => p.toString() === userId.toString()
+  const alreadyJoined = (meeting.participants || []).some(
+    (p) => (p?._id || p)?.toString() === userId.toString()
   )
 
   const user = await userRepo.findById(userId)
@@ -312,11 +360,21 @@ const joinMeeting = async (meetingId, userId) => {
         sender: userId,
         type: "system",
         title: "Participant Joined",
-        message: `${user?.name || "A user"} joined your meeting "${meeting.title}"`,
+        message: `${user?.name || "A member"} joined your meeting "${meeting.title}"`,
         link: `/meetings/${meetingId}`,
       })
     } catch (err) {
       console.log("Join notification error:", err.message)
+    }
+  }
+
+  // Also ensure participant is recorded in attendedMeetings
+  if (user) {
+    const exists = (user.attendedMeetings || []).find(
+      (a) => a.meeting?.toString() === meetingId.toString()
+    );
+    if (!exists) {
+      await userRepo.addAttendedMeeting(userId, meetingId);
     }
   }
 
@@ -354,7 +412,8 @@ const startMeeting = async (meetingId, userId) => {
     throw error
   }
 
-  if (meeting.host.toString() !== userId.toString()) {
+  const hostId = (meeting.host?._id || meeting.host)?.toString();
+  if (hostId !== userId.toString()) {
     const error = new Error("Only host can start the meeting")
     error.statusCode = 403
     throw error
@@ -386,7 +445,8 @@ const leaveMeeting = async (meetingId, userId) => {
     throw error;
   }
 
-  if (meeting.host.toString() === userId.toString()) {
+  const hostId = (meeting.host?._id || meeting.host)?.toString();
+  if (hostId === userId.toString()) {
     const error = new Error("Host cannot leave. Please end the meeting");
     error.statusCode = 400;
     throw error;
@@ -394,7 +454,7 @@ const leaveMeeting = async (meetingId, userId) => {
 
   const user = await userRepo.findById(userId);
 
-  await meetingRepo.removeParticipant(meetingId, userId);
+  // Preserve participant in meeting attendance history (do NOT remove from meetingRepo)
   await clearMeetingCaches(meetingId, userId);
 
   const roomManager = require("../webrtc/roomManager");
@@ -418,8 +478,8 @@ const leaveMeeting = async (meetingId, userId) => {
       recipient: meeting.host,
       sender: userId,
       type: "system",
-      title: "Participant Left",
-      message: `${user?.name || "A user"} left your meeting "${meeting.title}"`,
+      title: "Member Left",
+      message: `${user?.name || "A member"} left your meeting "${meeting.title}"`,
       link: `/meetings/${meetingId}`,
     });
   } catch (err) {
@@ -445,7 +505,8 @@ const endMeeting = async (meetingId, userId) => {
     throw error;
   }
 
-  if (meeting.host.toString() !== userId.toString()) {
+  const hostId = (meeting.host?._id || meeting.host)?.toString();
+  if (hostId !== userId.toString()) {
     const error = new Error("Only host can end the meeting");
     error.statusCode = 403;
     throw error;
@@ -509,8 +570,8 @@ const hideMeetingFromUser = async (meetingId, userId) => {
   return { message: "Meeting removed from your list" };
 };
 
-// Upload or save meeting recording URL
-const uploadMeetingRecording = async (meetingId, userId, file, recordingUrl) => {
+// Upload or save meeting recording URL (Fast local write + background Cloudinary sync, supports multiple recordings)
+const uploadMeetingRecording = async (meetingId, userId, file, recordingUrl, metadata = {}) => {
   const meeting = await meetingRepo.findById(meetingId);
   if (!meeting) {
     const error = new Error("Meeting not found");
@@ -518,32 +579,50 @@ const uploadMeetingRecording = async (meetingId, userId, file, recordingUrl) => 
     throw error;
   }
 
-  // Delete previous recording if one already exists
-  if (meeting.recordingUrl) {
-    await deleteMediaFile(meeting.recordingUrl);
-  }
-
   let finalUrl = recordingUrl || "";
+  let fileSize = metadata.size || (file ? file.size : 0);
+  let duration = metadata.duration || 0;
 
   if (file && file.buffer) {
-    try {
-      const result = await uploadToCloudinary(file.buffer, {
+    const fs = require("fs");
+    const path = require("path");
+    const uploadDir = path.join(__dirname, "../../uploads/recordings");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    const filename = `recording-${meetingId}-${Date.now()}.webm`;
+    const filePath = path.join(uploadDir, filename);
+
+    // 1. Write file to disk immediately (takes <20ms for fast user response)
+    fs.writeFileSync(filePath, file.buffer);
+    finalUrl = `/uploads/recordings/${filename}`;
+    fileSize = file.size || file.buffer.length;
+
+    // 2. Background sync to Cloudinary if configured (non-blocking)
+    if (process.env.CLOUDINARY_API_KEY && process.env.ENABLE_CLOUDINARY_RECORDINGS === "true") {
+      uploadToCloudinary(file.buffer, {
         subfolder: "recordings",
         resource_type: "video",
-      });
-      finalUrl = result.secure_url;
-    } catch (cloudErr) {
-      console.warn("Cloudinary upload failed, falling back to disk:", cloudErr.message);
-      const fs = require("fs");
-      const path = require("path");
-      const uploadDir = path.join(__dirname, "../../uploads/recordings");
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true });
-      }
-      const filename = `recording-${meetingId}-${Date.now()}.webm`;
-      const filePath = path.join(uploadDir, filename);
-      fs.writeFileSync(filePath, file.buffer);
-      finalUrl = `/uploads/recordings/${filename}`;
+      })
+        .then(async (result) => {
+          if (result?.secure_url) {
+            console.log(`[MediaStorage] Background Cloudinary sync complete for meeting ${meetingId}`);
+            // Update the matching recording in recordings array
+            await Meeting.updateOne(
+              { _id: meetingId, "recordings.url": finalUrl },
+              { $set: { "recordings.$.url": result.secure_url } }
+            );
+            await meetingRepo.updateById(meetingId, { recordingUrl: result.secure_url });
+            await clearMeetingCaches(meetingId, meeting.host);
+            try {
+              if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            } catch {}
+          }
+        })
+        .catch((err) => {
+          console.warn("[MediaStorage] Background Cloudinary sync skipped, recording safe on disk:", err.message);
+        });
     }
   }
 
@@ -553,15 +632,44 @@ const uploadMeetingRecording = async (meetingId, userId, file, recordingUrl) => 
     throw error;
   }
 
+  // Handle multiple recordings array without overwriting previous sessions
+  const existingRecordings = Array.isArray(meeting.recordings) ? [...meeting.recordings] : [];
+
+  // If there was an old recordingUrl but recordings array was empty, preserve it as Recording 1
+  if (existingRecordings.length === 0 && meeting.recordingUrl) {
+    existingRecordings.push({
+      url: meeting.recordingUrl,
+      title: `${meeting.title} - Recording 1`,
+      duration: 0,
+      size: 0,
+      createdAt: meeting.updatedAt || new Date(),
+    });
+  }
+
+  const recordingNumber = existingRecordings.length + 1;
+  const recordingTitle =
+    metadata.title || `${meeting.title} - Recording ${recordingNumber}`;
+
+  const newRecording = {
+    url: finalUrl,
+    title: recordingTitle,
+    duration: Number(duration) || 0,
+    size: Number(fileSize) || 0,
+    createdAt: new Date(),
+  };
+
+  existingRecordings.push(newRecording);
+
   const updated = await meetingRepo.updateById(meetingId, {
     recordingUrl: finalUrl,
+    recordings: existingRecordings,
     recordingDeletedByHost: false,
     isRecording: false,
   });
 
   await clearMeetingCaches(meetingId, meeting.host);
 
-  return { meeting: updated, recordingUrl: finalUrl };
+  return { meeting: updated, recording: newRecording, recordingUrl: finalUrl };
 };
 
 module.exports = {
