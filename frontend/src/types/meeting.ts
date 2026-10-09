@@ -23,30 +23,36 @@ export interface Meeting {
     description?: string
     host: MeetingParticipant
     participants: MeetingParticipant[]
-    meetingCode: string
-    scheduledAt: string
-    startedAt?: string | null
-    endedAt?: string | null
-    recordingUrl?: string
-    recordings?: MeetingRecordingItem[]
-    isRecording?: boolean
-    recordingDeletedByHost?: boolean
-    isHostDeleted?: boolean
-    status: 'scheduled' | 'ongoing' | 'completed' | 'cancelled'
+    meetingCode: string;
+    scheduledAt: string;
+    startTime?: string;
+    endTime?: string | null;
+    startedAt?: string | null;
+    endedAt?: string | null;
+    recordingUrl?: string;
+    recordings?: MeetingRecordingItem[];
+    isRecording?: boolean;
+    recordingStartedAt?: string | number | null;
+    recordingUserId?: string | null;
+    recordingDeletedByHost?: boolean;
+    isHostDeleted?: boolean;
+    status: 'scheduled' | 'ongoing' | 'completed' | 'cancelled';
     settings: {
-        allowChat: boolean
-        allowScreenShare: boolean
-        muteOnJoin: boolean
-        waitingRoom: boolean
-    }
-    createdAt: string
-    updatedAt: string
+        allowChat: boolean;
+        allowScreenShare: boolean;
+        muteOnJoin: boolean;
+        waitingRoom: boolean;
+    };
+    createdAt: string;
+    updatedAt: string;
 }
 
 export interface CreateMeetingPayload {
-    title: string
-    description?: string
-    scheduledAt?: string
+    title: string;
+    description?: string;
+    scheduledAt?: string;
+    startTime?: string;
+    endTime?: string | null;
 }
 
 export interface VideoPeer {

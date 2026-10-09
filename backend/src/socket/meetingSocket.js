@@ -4,6 +4,57 @@
 
 const roomManager = require("../webrtc/roomManager");
 const notificationService = require("../services/notificationService");
+const { deleteCacheByPattern } = require("../utils/redisHelpers");
+
+const clearMeetingCaches = async (meetingId, hostId) => {
+  try {
+    await deleteCacheByPattern(`meeting:${meetingId}*`);
+    const hostStr = (hostId?._id || hostId)?.toString();
+    if (hostStr) {
+      await deleteCacheByPattern(`user:${hostStr}:meetings`);
+    }
+    await deleteCacheByPattern("user:*:meetings");
+  } catch (err) {
+    console.error("Cache clear error in socket:", err.message);
+  }
+};
+
+const autoEndMeetingIfEmpty = async (io, meetingId, userId) => {
+  try {
+    const roomUsers = roomManager.getRoomUsers(meetingId);
+    if (roomUsers.length === 0) {
+      const meetingRepo = require("../repositories/meetingRepository");
+      const meeting = await meetingRepo.findById(meetingId);
+      if (meeting && meeting.status === "ongoing") {
+        const hostId = (meeting.host?._id || meeting.host)?.toString();
+        const nonHostParticipants = (meeting.participants || []).filter(
+          (p) => (p?._id || p)?.toString() !== hostId
+        );
+        const hasMembers = nonHostParticipants.length > 0;
+        const now = new Date();
+
+        const updateData = {
+          status: "completed",
+          endedAt: hasMembers ? now : null,
+        };
+        if (!hasMembers) {
+          updateData.startedAt = null;
+        }
+
+        await meetingRepo.updateById(meetingId, updateData);
+        await clearMeetingCaches(meetingId, hostId);
+
+        io.to(meetingId).emit("meeting:ended", {
+          meetingId,
+          message: "Meeting has ended (all participants have left)",
+        });
+        io.in(meetingId).socketsLeave(meetingId);
+      }
+    }
+  } catch (err) {
+    console.error("Auto end meeting on empty room error:", err.message);
+  }
+};
 
 const registerMeetingHandlers = (io, socket) => {
 
@@ -40,6 +91,18 @@ const registerMeetingHandlers = (io, socket) => {
 
       const hostId = (meeting.host?._id || meeting.host)?.toString();
       const isHost = hostId === socket.user.id.toString();
+
+      if (isHost && !meeting.startedAt) {
+        const now = new Date();
+        await meetingRepo.updateById(meetingId, {
+          startedAt: now,
+          status: "ongoing",
+        });
+        await clearMeetingCaches(meetingId, socket.user.id);
+        meeting.startedAt = now;
+        meeting.status = "ongoing";
+      }
+
       const alreadyParticipant = (meeting.participants || []).some(
         (p) => (p?._id || p)?.toString() === socket.user.id.toString()
       );
@@ -73,11 +136,15 @@ const registerMeetingHandlers = (io, socket) => {
       });
 
       const recordingUserId = roomManager.getRecordingUser(meetingId);
+      const recordingStartedAt = roomManager.getRecordingStartedAt(meetingId);
+      const isRecordingActive = Boolean(recordingStartedAt);
+
       socket.emit("meeting:joined", {
         meetingId,
         screenSharingUserId: roomManager.getScreenSharingUser(meetingId),
         recordingUserId,
-        isRecording: !!recordingUserId,
+        isRecording: isRecordingActive,
+        recordingStartedAt,
         users: users.map((u) => ({
           userId: u.userId,
           name: u.name,
@@ -87,6 +154,17 @@ const registerMeetingHandlers = (io, socket) => {
           isVideoOn: u.isVideoOn,
         })),
       });
+
+      // Instantly push recording status to joining participant so REC badge appears immediately without refresh
+      if (isRecordingActive) {
+        socket.emit("meeting:recording-started", {
+          meetingId,
+          userId: recordingUserId,
+          name: "Host",
+          startedAt: recordingStartedAt,
+          isSilent: true,
+        });
+      }
 
       if (!isHost) {
         try {
@@ -152,6 +230,11 @@ const registerMeetingHandlers = (io, socket) => {
         name: socket.user.name,
         username: socket.user.username,
       });
+
+      // If room is now empty (all participants left), auto-end the meeting
+      if (leaveResult?.remainingCount === 0) {
+        await autoEndMeetingIfEmpty(io, meetingId, socket.user.id);
+      }
     } catch (err) {
       console.log("Meeting leave error:", err.message);
     }
@@ -198,13 +281,15 @@ const registerMeetingHandlers = (io, socket) => {
   });
 
   // Broadcast recording start to participants
-  socket.on("meeting:recording-started", ({ meetingId }) => {
+  socket.on("meeting:recording-started", ({ meetingId, startedAt }) => {
     if (!meetingId) return;
-    roomManager.setRecordingUser(meetingId, socket.user.id);
+    const startTime = Number(startedAt) || Date.now();
+    roomManager.setRecordingUser(meetingId, socket.user.id, startTime);
 
     socket.to(meetingId).emit("meeting:recording-started", {
       userId: socket.user.id,
       name: socket.user.name,
+      startedAt: startTime,
     });
   });
 
@@ -377,6 +462,11 @@ const registerMeetingHandlers = (io, socket) => {
         name: socket.user.name,
         username: socket.user.username,
       });
+
+      // If room is now empty (all participants left), auto-end the meeting
+      if (disconnectResult?.remainingCount === 0) {
+        await autoEndMeetingIfEmpty(io, meetingId, socket.user.id);
+      }
     }
   });
 };

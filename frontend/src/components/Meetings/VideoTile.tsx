@@ -30,6 +30,7 @@ export function VideoTile({
   className,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [, setTrackStateTick] = useState(0);
 
   // Listen to track lifecycle changes (unmute, mute, ended) so UI syncs immediately
@@ -55,29 +56,68 @@ export function VideoTile({
     };
   }, [stream]);
 
-  // Attach stream when stream changes or media state changes
+  // Dedicated audio playback for remote participants to guarantee voice playback even when camera is off
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !stream || isLocal) return;
+
+    if (audio.srcObject !== stream) {
+      audio.srcObject = stream;
+    }
+
+    const tryPlayAudio = () => {
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch((err) => {
+          console.warn("Remote audio play notice:", err.message);
+        });
+      }
+    };
+
+    tryPlayAudio();
+
+    const audioTracks = stream.getAudioTracks();
+    audioTracks.forEach((t) => {
+      t.addEventListener("unmute", tryPlayAudio);
+    });
+
+    // Fallback user interaction listener in case browser autoplay policy demands a gesture
+    const handleUserGesture = () => {
+      if (audio && audio.paused) {
+        audio.play().catch(() => {});
+      }
+    };
+    window.addEventListener("click", handleUserGesture, { once: true });
+    window.addEventListener("keydown", handleUserGesture, { once: true });
+
+    return () => {
+      audioTracks.forEach((t) => {
+        t.removeEventListener("unmute", tryPlayAudio);
+      });
+      window.removeEventListener("click", handleUserGesture);
+      window.removeEventListener("keydown", handleUserGesture);
+    };
+  }, [stream, isLocal]);
+
+  // Attach stream to video element when stream or video state changes
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !stream) return;
 
-    video.srcObject = stream;
-
-    if (isScreenSharing || isLocal) {
-      video.muted = true;
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
     }
+
+    // Video element is always muted to prevent audio doubling (audio is cleanly handled by audioRef)
+    video.muted = true;
 
     if (isVideoOn || isScreenSharing) {
       const playPromise = video.play();
       if (playPromise && typeof playPromise.catch === "function") {
-        playPromise.catch((err) => {
-          if (err.name === "NotAllowedError") {
-            video.muted = true;
-            video.play().catch(() => {});
-          }
-        });
+        playPromise.catch(() => {});
       }
     }
-  }, [stream, isVideoOn, isScreenSharing, isLocal]);
+  }, [stream, isVideoOn, isScreenSharing]);
 
   const hasStream = !!stream;
 
@@ -100,13 +140,22 @@ export function VideoTile({
         isSpeaking && !isMuted ? "ring-2 ring-blue-500 shadow-[0_0_16px_rgba(59,130,246,0.4)]" : ""
       } ${className || "aspect-video"}`}
     >
+      {/* Dedicated Audio Element for Remote Participants (voice plays reliably regardless of camera state) */}
+      {!isLocal && stream && (
+        <audio
+          ref={audioRef}
+          autoPlay
+          playsInline
+        />
+      )}
+
       {/* Video Element */}
       {hasStream && (
         <video
           ref={videoRef}
           autoPlay
           playsInline
-          muted={isLocal || isScreenSharing}
+          muted={true}
           onLoadedMetadata={() => {
             videoRef.current?.play().catch(() => {});
           }}

@@ -16,8 +16,18 @@ import {
   Calendar,
   Shield,
   Radio,
+  Clock,
+  CheckCircle2,
 } from "lucide-react";
 import { Header } from "@/components/common/Header";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   Card,
   CardContent,
@@ -31,15 +41,41 @@ import { Label } from "@/components/ui/label";
 import { createMeeting } from "@/services/meetingService";
 import { getErrorMessage } from "@/utils/errorHelper";
 
-const schema = z.object({
-  title: z.string().min(2, "Title must be at least 2 characters"),
-  description: z.string().optional(),
-});
+// Format date into YYYY-MM-DDTHH:mm local datetime string for input
+const formatLocalDateTime = (date: Date = new Date()) => {
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const schema = z
+  .object({
+    title: z.string().min(2, "Title must be at least 2 characters"),
+    description: z.string().optional(),
+    startTime: z.string().min(1, "Starting time is required"),
+    endTime: z.string().optional(),
+  })
+  .refine(
+    (data) => {
+      if (!data.endTime || !data.endTime.trim()) return true;
+      return new Date(data.endTime) > new Date(data.startTime);
+    },
+    {
+      message: "Ending time must be after starting time",
+      path: ["endTime"],
+    }
+  );
 
 type FormData = z.infer<typeof schema>;
 
 export default function CreateMeeting() {
   const [isLoading, setIsLoading] = useState(false);
+  const [createdMeetingId, setCreatedMeetingId] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -47,20 +83,47 @@ export default function CreateMeeting() {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<FormData>({ resolver: zodResolver(schema) });
+  } = useForm<FormData>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      startTime: formatLocalDateTime(new Date()),
+      endTime: "",
+    },
+  });
 
   const onSubmit = async (data: FormData) => {
     setIsLoading(true);
     try {
-      const meeting = await createMeeting(data);
+      const meetingStartTime = new Date(data.startTime).toISOString();
+      const meetingEndTime = data.endTime && data.endTime.trim() ? new Date(data.endTime).toISOString() : null;
+
+      const meeting = await createMeeting({
+        title: data.title,
+        description: data.description,
+        scheduledAt: meetingStartTime,
+        startTime: meetingStartTime,
+        endTime: meetingEndTime,
+      });
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
-      toast.success("Meeting created successfully! Entering room...");
-      navigate(`/meetings/${meeting._id}`);
+      toast.success("Meeting created successfully");
+      setCreatedMeetingId(meeting._id);
+      setIsDialogOpen(true);
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleJoinNow = () => {
+    if (createdMeetingId) {
+      navigate(`/meetings/${createdMeetingId}`);
+    }
+  };
+
+  const handleGoToDashboard = () => {
+    queryClient.invalidateQueries({ queryKey: ["meetings"] });
+    navigate("/meetings");
   };
 
   return (
@@ -125,6 +188,49 @@ export default function CreateMeeting() {
                 />
               </div>
 
+              {/* Meeting Schedule Time (Start & End Time) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-xl border border-slate-200/90 bg-slate-50/60">
+                {/* Starting Time (Mandatory) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="startTime" className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-blue-600" />
+                      Starting Time <span className="text-red-500">*</span>
+                    </Label>
+                    <span className="text-[10px] text-slate-400 font-medium">Default: Current time</span>
+                  </div>
+                  <Input
+                    id="startTime"
+                    type="datetime-local"
+                    className="bg-white border-slate-200 focus:border-blue-500 text-slate-900 rounded-xl text-xs h-10"
+                    {...register("startTime")}
+                  />
+                  {errors.startTime && (
+                    <p className="text-xs text-red-500">{errors.startTime.message}</p>
+                  )}
+                </div>
+
+                {/* Ending Time (Optional) */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="endTime" className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-slate-500" />
+                      Ending Time <span className="text-slate-400 font-normal">(Optional)</span>
+                    </Label>
+                    <span className="text-[10px] text-slate-400 font-medium">Leave empty: Open-ended</span>
+                  </div>
+                  <Input
+                    id="endTime"
+                    type="datetime-local"
+                    className="bg-white border-slate-200 focus:border-blue-500 text-slate-900 rounded-xl text-xs h-10"
+                    {...register("endTime")}
+                  />
+                  {errors.endTime && (
+                    <p className="text-xs text-red-500">{errors.endTime.message}</p>
+                  )}
+                </div>
+              </div>
+
               {/* Feature Highlights Card */}
               <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50 space-y-2.5 text-xs text-slate-700">
                 <span className="text-slate-500 font-semibold text-[10px] uppercase tracking-wider block">
@@ -176,6 +282,50 @@ export default function CreateMeeting() {
           </CardContent>
         </Card>
       </main>
+
+      {/* Meeting Created Action Dialog */}
+      <Dialog
+        open={isDialogOpen}
+        onOpenChange={(open) => {
+          // Disable closing the dialog by clicking outside or escape key
+          if (!open) return;
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="bg-white border border-slate-200 text-slate-900 rounded-2xl p-6 shadow-2xl sm:max-w-md"
+        >
+          <DialogHeader className="text-left space-y-2">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center mb-1">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+            </div>
+            <DialogTitle className="text-lg font-bold text-slate-900">
+              Meeting Created
+            </DialogTitle>
+            <DialogDescription className="text-sm text-slate-600">
+              Your meeting is ready. What would you like to do?
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="mt-4 flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleGoToDashboard}
+              className="w-full sm:w-auto rounded-xl text-xs h-10 border-slate-300 text-slate-700 hover:bg-slate-100 font-medium"
+            >
+              Go to Dashboard
+            </Button>
+            <Button
+              type="button"
+              onClick={handleJoinNow}
+              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-xs h-10 shadow-xs"
+            >
+              Join Now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

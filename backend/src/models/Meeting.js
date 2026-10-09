@@ -43,6 +43,14 @@ const meetingSchema = new mongoose.Schema(
             type: Date,
             default: Date.now,
         },
+        startTime: {
+            type: Date,
+            default: Date.now,
+        },
+        endTime: {
+            type: Date,
+            default: null,
+        },
         startedAt: {
             type: Date,
             default: null,
@@ -59,6 +67,14 @@ const meetingSchema = new mongoose.Schema(
         isRecording: {
             type: Boolean,
             default: false,
+        },
+        recordingStartedAt: {
+            type: Date,
+            default: null,
+        },
+        recordingUserId: {
+            type: String,
+            default: null,
         },
         recordingUrl: {
             type: String,

@@ -11,6 +11,7 @@ const createRoom = (meetingId) => {
       users: new Map(),
       screenSharingUserId: null,
       recordingUserId: null,
+      recordingStartedAt: null,
       createdAt: new Date(),
     });
   }
@@ -48,6 +49,11 @@ const removeUserFromRoom = (meetingId, userId) => {
     room.screenSharingUserId.toString() === userId.toString()
   );
 
+  const wasRecording = Boolean(
+    room.recordingUserId &&
+    room.recordingUserId.toString() === userId.toString()
+  );
+
   room.users.delete(userId.toString());
 
   // Clear screen share if this user was sharing
@@ -56,17 +62,16 @@ const removeUserFromRoom = (meetingId, userId) => {
   }
 
   // Clear recording if this user was recording
-  if (
-    room.recordingUserId &&
-    room.recordingUserId.toString() === userId.toString()
-  ) {
+  if (wasRecording) {
     room.recordingUserId = null;
   }
 
-  if (room.users.size === 0) {
+  const remainingCount = room.users.size;
+
+  if (remainingCount === 0) {
     activeRooms.delete(meetingId);
   }
-  return { room, wasScreenSharing };
+  return { room, wasScreenSharing, wasRecording, remainingCount };
 };
 
 // Clear a room entirely
@@ -120,19 +125,27 @@ const getScreenSharingUser = (meetingId) => {
   return room?.screenSharingUserId ? room.screenSharingUserId.toString() : null;
 };
 
-// Set who is recording
-const setRecordingUser = (meetingId, userId) => {
+// Set who is recording and recording started timestamp
+const setRecordingUser = (meetingId, userId, startedAt = Date.now()) => {
   const room = activeRooms.get(meetingId);
   if (!room) return null;
-  room.recordingUserId = userId;
+  room.recordingUserId = userId ? userId.toString() : null;
+  if (userId) {
+    if (!room.recordingStartedAt) {
+      room.recordingStartedAt = Number(startedAt) || Date.now();
+    }
+  } else {
+    room.recordingStartedAt = null;
+  }
   return room;
 };
 
-// Clear recording user
+// Clear recording user and timestamp
 const clearRecordingUser = (meetingId) => {
   const room = activeRooms.get(meetingId);
   if (!room) return null;
   room.recordingUserId = null;
+  room.recordingStartedAt = null;
   return room;
 };
 
@@ -140,6 +153,12 @@ const clearRecordingUser = (meetingId) => {
 const getRecordingUser = (meetingId) => {
   const room = activeRooms.get(meetingId);
   return room?.recordingUserId || null;
+};
+
+// Get when recording started
+const getRecordingStartedAt = (meetingId) => {
+  const room = activeRooms.get(meetingId);
+  return room?.recordingStartedAt || null;
 };
 
 // Get active rooms count
@@ -172,6 +191,7 @@ module.exports = {
   setRecordingUser,
   clearRecordingUser,
   getRecordingUser,
+  getRecordingStartedAt,
   getActiveRoomsCount,
   getAllRooms,
 };

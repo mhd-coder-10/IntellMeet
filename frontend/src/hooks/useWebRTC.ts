@@ -235,20 +235,36 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   useEffect(() => {
     if (!socket || !meetingId) return;
 
-    socket.on(
-      "meeting:joined",
-      async ({
-        users,
-        screenSharingUserId,
-      }: {
-        users: MeetingUser[];
-        screenSharingUserId: string | null;
-      }) => {
+    const handleJoined = async ({
+      users,
+      screenSharingUserId,
+      isRecording,
+      recordingUserId,
+      recordingStartedAt,
+    }: {
+      users: MeetingUser[];
+      screenSharingUserId: string | null;
+      isRecording?: boolean;
+      recordingUserId?: string | null;
+      recordingStartedAt?: number | null;
+    }) => {
         // Restore ongoing screen share state
         if (screenSharingUserId) {
           useMeetingStore
             .getState()
             .setScreenSharingUserId(screenSharingUserId);
+        }
+
+        // Restore ongoing live recording state immediately upon join/rejoin
+        if (isRecording) {
+          useMeetingStore
+            .getState()
+            .setRecordingState(
+              true,
+              recordingUserId,
+              "Meeting",
+              recordingStartedAt || Date.now()
+            );
         }
 
         const stream = localStream || (await startLocalStream());
@@ -267,112 +283,108 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
             stream
           );
         }
-      }
-    );
+      };
 
-    socket.on("meeting:user-joined", (data) => {
+    const handleUserJoined = (data: any) => {
       console.log("User joined:", data.name);
-    });
+    };
 
-    socket.on("meeting:user-left", ({ userId }) => {
+    const handleUserLeft = ({ userId }: { userId: any }) => {
       const pc = peerConnections.current.get(String(userId));
       if (pc) {
         pc.close();
         peerConnections.current.delete(String(userId));
       }
       removePeer(userId);
-    });
+    };
 
     // Handle incoming offer (answerer side): attach tracks to negotiated transceivers
-    socket.on(
-      "webrtc:offer",
-      async ({
-        fromUserId,
-        fromUsername,
-        fromName,
-        fromProfilePicture,
-        sdp,
-        isMuted: remoteMuted,
-        isVideoOn: remoteVideoOn,
-      }) => {
-        if (fromUserId === currentUserId) return;
-        const stream = localStream || (await startLocalStream());
+    const handleOffer = async ({
+      fromUserId,
+      fromUsername,
+      fromName,
+      fromProfilePicture,
+      sdp,
+      isMuted: remoteMuted,
+      isVideoOn: remoteVideoOn,
+    }: any) => {
+      if (fromUserId === currentUserId) return;
+      const stream = localStream || (await startLocalStream());
 
-        const pc = new RTCPeerConnection(ICE_SERVERS);
-        const peerId = String(fromUserId);
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      const peerId = String(fromUserId);
 
-        pc.onicecandidate = (event) => {
-          if (event.candidate && socket) {
-            socket.emit("webrtc:ice-candidate", {
-              meetingId,
-              toUserId: fromUserId,
-              candidate: event.candidate,
-            });
+      pc.onicecandidate = (event) => {
+        if (event.candidate && socket) {
+          socket.emit("webrtc:ice-candidate", {
+            meetingId,
+            toUserId: fromUserId,
+            candidate: event.candidate,
+          });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        syncPeerStream(pc, fromUserId, updatePeer);
+        if (event.track) {
+          event.track.onunmute = () => syncPeerStream(pc, fromUserId, updatePeer);
+          event.track.onended = () => syncPeerStream(pc, fromUserId, updatePeer);
+        }
+      };
+
+      peerConnections.current.set(peerId, pc);
+
+      addPeer({
+        userId: fromUserId,
+        name: fromName || fromUsername,
+        username: fromUsername,
+        profilePicture: fromProfilePicture,
+        isMuted: remoteMuted ?? false,
+        isVideoOn: remoteVideoOn ?? true,
+      });
+
+      // 1. Set remote description from incoming offer first so transceivers match the offer
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+
+      // 2. Attach local tracks to the negotiated transceivers
+      const audioTrack = stream.getAudioTracks()[0];
+      const videoTrack = stream.getVideoTracks()[0];
+
+      pc.getTransceivers().forEach((transceiver) => {
+        const kind = transceiver.receiver?.track?.kind;
+        if (kind === "audio") {
+          if (audioTrack) {
+            transceiver.sender.replaceTrack(audioTrack).catch(console.warn);
           }
-        };
-
-        pc.ontrack = (event) => {
-          syncPeerStream(pc, fromUserId, updatePeer);
-          if (event.track) {
-            event.track.onunmute = () => syncPeerStream(pc, fromUserId, updatePeer);
-            event.track.onended = () => syncPeerStream(pc, fromUserId, updatePeer);
+          transceiver.direction = "sendrecv";
+        } else if (kind === "video") {
+          if (videoTrack) {
+            transceiver.sender.replaceTrack(videoTrack).catch(console.warn);
           }
-        };
+          transceiver.direction = "sendrecv";
+        }
+      });
 
-        peerConnections.current.set(peerId, pc);
+      // 3. Create answer and send back
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
 
-        addPeer({
-          userId: fromUserId,
-          name: fromName || fromUsername,
-          username: fromUsername,
-          profilePicture: fromProfilePicture,
-          isMuted: remoteMuted ?? false,
-          isVideoOn: remoteVideoOn ?? true,
-        });
+      socket.emit("webrtc:answer", {
+        meetingId,
+        toUserId: fromUserId,
+        sdp: answer,
+      });
+    };
 
-        // 1. Set remote description from incoming offer first so transceivers match the offer
-        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-
-        // 2. Attach local tracks to the negotiated transceivers
-        const audioTrack = stream.getAudioTracks()[0];
-        const videoTrack = stream.getVideoTracks()[0];
-
-        pc.getTransceivers().forEach((transceiver) => {
-          const kind = transceiver.receiver?.track?.kind;
-          if (kind === "audio") {
-            if (audioTrack) {
-              transceiver.sender.replaceTrack(audioTrack).catch(console.warn);
-            }
-            transceiver.direction = "sendrecv";
-          } else if (kind === "video") {
-            if (videoTrack) {
-              transceiver.sender.replaceTrack(videoTrack).catch(console.warn);
-            }
-            transceiver.direction = "sendrecv";
-          }
-        });
-
-        // 3. Create answer and send back
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        socket.emit("webrtc:answer", {
-          meetingId,
-          toUserId: fromUserId,
-          sdp: answer,
-        });
-      }
-    );
-
-    socket.on("webrtc:answer", async ({ fromUserId, sdp }) => {
+    const handleAnswer = async ({ fromUserId, sdp }: any) => {
       const pc = peerConnections.current.get(String(fromUserId));
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         syncPeerStream(pc, fromUserId, updatePeer);
       }
-    });
+    };
 
-    socket.on("webrtc:ice-candidate", async ({ fromUserId, candidate }) => {
+    const handleIceCandidate = async ({ fromUserId, candidate }: any) => {
       const pc = peerConnections.current.get(String(fromUserId));
       if (pc && candidate) {
         try {
@@ -381,38 +393,39 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
           console.error("ICE candidate error:", err);
         }
       }
-    });
+    };
 
     // On media state change, rebuild peer stream with fresh reference
-    socket.on(
-      "meeting:media-state-changed",
-      ({ userId, isMuted: remoteMuted, isVideoOn: remoteVideoOn }) => {
-        const uIdStr = String(userId);
-        const pc = peerConnections.current.get(uIdStr);
+    const handleMediaStateChanged = ({
+      userId,
+      isMuted: remoteMuted,
+      isVideoOn: remoteVideoOn,
+    }: any) => {
+      const uIdStr = String(userId);
+      const pc = peerConnections.current.get(uIdStr);
 
-        const freshStream = new MediaStream();
-        if (pc) {
-          pc.getReceivers().forEach((r) => {
-            if (
-              r.track &&
-              r.track.readyState !== "ended" &&
-              !freshStream.getTracks().some((t) => t.id === r.track.id)
-            ) {
-              freshStream.addTrack(r.track);
-            }
-          });
-        }
-
-        updatePeer(userId, {
-          isMuted: remoteMuted,
-          isVideoOn: remoteVideoOn,
-          ...(freshStream.getTracks().length > 0 ? { stream: freshStream } : {}),
+      const freshStream = new MediaStream();
+      if (pc) {
+        pc.getReceivers().forEach((r) => {
+          if (
+            r.track &&
+            r.track.readyState !== "ended" &&
+            !freshStream.getTracks().some((t) => t.id === r.track.id)
+          ) {
+            freshStream.addTrack(r.track);
+          }
         });
       }
-    );
+
+      updatePeer(userId, {
+        isMuted: remoteMuted,
+        isVideoOn: remoteVideoOn,
+        ...(freshStream.getTracks().length > 0 ? { stream: freshStream } : {}),
+      });
+    };
 
     // Screen share started: update store and re-sync presenter stream instantly
-    socket.on("meeting:screen-share-started", ({ userId }: { userId: string }) => {
+    const handleScreenShareStarted = ({ userId }: { userId: string }) => {
       useMeetingStore.getState().setScreenSharingUserId(userId);
       const uIdStr = String(userId);
       const pc = peerConnections.current.get(uIdStr);
@@ -420,26 +433,36 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
         syncPeerStream(pc, userId, updatePeer);
         updatePeer(userId, { isVideoOn: true });
       }
-    });
+    };
 
     // Screen share stopped: update store and re-sync all peer streams
-    socket.on("meeting:screen-share-stopped", () => {
+    const handleScreenShareStopped = () => {
       useMeetingStore.getState().setScreenSharingUserId(null);
       peerConnections.current.forEach((pc, peerId) => {
         syncPeerStream(pc, peerId, updatePeer);
       });
-    });
+    };
+
+    socket.on("meeting:joined", handleJoined);
+    socket.on("meeting:user-joined", handleUserJoined);
+    socket.on("meeting:user-left", handleUserLeft);
+    socket.on("webrtc:offer", handleOffer);
+    socket.on("webrtc:answer", handleAnswer);
+    socket.on("webrtc:ice-candidate", handleIceCandidate);
+    socket.on("meeting:media-state-changed", handleMediaStateChanged);
+    socket.on("meeting:screen-share-started", handleScreenShareStarted);
+    socket.on("meeting:screen-share-stopped", handleScreenShareStopped);
 
     return () => {
-      socket.off("meeting:joined");
-      socket.off("meeting:user-joined");
-      socket.off("meeting:user-left");
-      socket.off("webrtc:offer");
-      socket.off("webrtc:answer");
-      socket.off("webrtc:ice-candidate");
-      socket.off("meeting:media-state-changed");
-      socket.off("meeting:screen-share-started");
-      socket.off("meeting:screen-share-stopped");
+      socket.off("meeting:joined", handleJoined);
+      socket.off("meeting:user-joined", handleUserJoined);
+      socket.off("meeting:user-left", handleUserLeft);
+      socket.off("webrtc:offer", handleOffer);
+      socket.off("webrtc:answer", handleAnswer);
+      socket.off("webrtc:ice-candidate", handleIceCandidate);
+      socket.off("meeting:media-state-changed", handleMediaStateChanged);
+      socket.off("meeting:screen-share-started", handleScreenShareStarted);
+      socket.off("meeting:screen-share-stopped", handleScreenShareStopped);
     };
   }, [
     socket,

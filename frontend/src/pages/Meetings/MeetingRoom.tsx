@@ -78,6 +78,9 @@ export default function MeetingRoom() {
 
   // Track unread messages when chat sidebar is closed
   const prevMessagesCountRef = useRef(messages.length);
+  // Deduplicate rapid join/leave notifications for the same user
+  const lastJoinToastRef = useRef<Map<string, number>>(new Map());
+  const lastLeftToastRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     if (isChatOpen) {
       setUnreadCount(0);
@@ -92,7 +95,29 @@ export default function MeetingRoom() {
     queryKey: ["meeting", id],
     queryFn: () => getMeetingById(id!),
     enabled: !!id,
+    refetchOnMount: "always",
+    staleTime: 0,
   });
+
+  // Instantly sync live recording state from meeting query without waiting for sockets
+  useEffect(() => {
+    if (meeting?.isRecording) {
+      const startedAt = meeting.recordingStartedAt
+        ? new Date(meeting.recordingStartedAt).getTime()
+        : Date.now();
+      setRecordingState(
+        true,
+        meeting.recordingUserId || null,
+        "Meeting",
+        startedAt
+      );
+    }
+  }, [
+    meeting?.isRecording,
+    meeting?.recordingStartedAt,
+    meeting?.recordingUserId,
+    setRecordingState,
+  ]);
 
   const isHost = meeting?.host._id === user?.id;
 
@@ -134,10 +159,30 @@ export default function MeetingRoom() {
     joinMeeting(id).catch(() => {});
   }, [id, setCurrentMeetingId]);
 
-  // Emit socket join and initial media state
+  // Emit socket join and initial media state, immediately attaching joined listener
   useEffect(() => {
     if (!socket || !isConnected || !id) return;
 
+    const handleJoined = (data: {
+      screenSharingUserId?: string | null;
+      isRecording?: boolean;
+      recordingUserId?: string | null;
+      recordingStartedAt?: number | null;
+    }) => {
+      if (data.screenSharingUserId) {
+        setScreenSharingUserId(data.screenSharingUserId);
+      }
+      if (data.isRecording) {
+        setRecordingState(
+          true,
+          data.recordingUserId,
+          "Meeting",
+          data.recordingStartedAt || Date.now()
+        );
+      }
+    };
+
+    socket.on("meeting:joined", handleJoined);
     socket.emit("meeting:join", { meetingId: id });
 
     const timer = setTimeout(() => {
@@ -149,8 +194,11 @@ export default function MeetingRoom() {
       });
     }, 1000);
 
-    return () => clearTimeout(timer);
-  }, [socket, isConnected, id]);
+    return () => {
+      clearTimeout(timer);
+      socket.off("meeting:joined", handleJoined);
+    };
+  }, [socket, isConnected, id, setScreenSharingUserId, setRecordingState]);
 
   // Start local camera and microphone
   useEffect(() => {
@@ -183,7 +231,7 @@ export default function MeetingRoom() {
     }
   }, [recordedResult]);
 
-  // Listen for host ending the meeting
+  // Listen for host ending or auto-concluded meeting
   useEffect(() => {
     if (!socket) return;
 
@@ -193,7 +241,30 @@ export default function MeetingRoom() {
     }) => {
       if (data.meetingId === id) {
         if (isEndingMeetingRef.current) return;
-        toast.info(data.message || "Meeting has been ended by the host");
+        toast.info(data.message || "Meeting has been ended");
+
+        if (isRecorderActive()) {
+          try {
+            const result = await stopRecording(true);
+            clearRecordedResult();
+            if (result && id) {
+              const currentStartedAt = useMeetingStore.getState().recordingStartTime;
+              const finalDuration = currentStartedAt
+                ? Math.max(result.duration, Math.round((Date.now() - currentStartedAt) / 1000))
+                : result.duration;
+              const currentCount = meeting?.recordings?.length || 0;
+              const partNumber = currentCount + 1;
+              await uploadMeetingRecording(id, result.blob, {
+                title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
+                duration: finalDuration,
+                size: result.size,
+              });
+            }
+          } catch (recErr) {
+            console.error("Save recording on meeting ended error:", recErr);
+          }
+        }
+
         stopLocalStream();
         closeAllPeers();
         resetMeeting();
@@ -211,6 +282,11 @@ export default function MeetingRoom() {
   }, [
     socket,
     id,
+    isRecording,
+    isRecorderActive,
+    stopRecording,
+    clearRecordedResult,
+    meeting?.title,
     stopLocalStream,
     closeAllPeers,
     resetMeeting,
@@ -221,19 +297,6 @@ export default function MeetingRoom() {
   // Listen for screen share and recording events across the room
   useEffect(() => {
     if (!socket) return;
-
-    const handleJoined = (data: {
-      screenSharingUserId?: string | null;
-      isRecording?: boolean;
-      recordingUserId?: string | null;
-    }) => {
-      if (data.screenSharingUserId) {
-        setScreenSharingUserId(data.screenSharingUserId);
-      }
-      if (data.isRecording) {
-        setRecordingState(true, data.recordingUserId, "Host", Date.now());
-      }
-    };
 
     const handleScreenStart = ({ userId, name }: { userId: string; name?: string }) => {
       setScreenSharingUserId(userId);
@@ -251,17 +314,36 @@ export default function MeetingRoom() {
       userId?: string;
       name?: string;
       startedAt?: number;
+      isSilent?: boolean;
     }) => {
       const recorderName = data.name || "Host";
       setRecordingState(true, data.userId, recorderName, data.startedAt || Date.now());
-      toast.info(`🔴 ${recorderName} started recording this meeting`);
-      playRecordingStartChime();
+      if (!data.isSilent) {
+        toast.info("🔴 Recording Started by Host");
+        playRecordingStartChime();
+      }
     };
 
-    const handleRecordStop = () => {
+    const handleRecordStop = async () => {
       setRecordingState(false);
       toast.info("Recording stopped");
       playRecordingStopChime();
+      if (isRecorderActive()) {
+        try {
+          const result = await stopRecording(true);
+          clearRecordedResult();
+          if (result && id) {
+            await uploadMeetingRecording(id, result.blob, {
+              title: `${meeting?.title || "Meeting"} - Recording`,
+              duration: result.duration,
+              size: result.size,
+            });
+            await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
+          }
+        } catch (err) {
+          console.error("Delegated recorder stop error:", err);
+        }
+      }
     };
 
     // Handle force mute by meeting host
@@ -292,24 +374,98 @@ export default function MeetingRoom() {
       }
     };
 
-    socket.on("meeting:joined", handleJoined);
+    const handleUserJoined = (data: {
+      userId: string;
+      name?: string;
+      username?: string;
+    }) => {
+      const currentUserId = user?.id || (user as any)?._id;
+      if (currentUserId && String(data.userId) === String(currentUserId)) return;
+
+      const userIdStr = String(data.userId);
+      const now = Date.now();
+      const lastNotified = lastJoinToastRef.current.get(userIdStr) || 0;
+      if (now - lastNotified < 3000) return; // Ignore duplicate join events within 3 seconds
+      lastJoinToastRef.current.set(userIdStr, now);
+      lastLeftToastRef.current.delete(userIdStr);
+
+      const hostId = (meeting?.host?._id || meeting?.host)?.toString();
+      const isHostJoining = hostId && userIdStr === String(hostId);
+      const peer = useMeetingStore
+        .getState()
+        .peers.find((p) => String(p.userId) === userIdStr);
+      const displayName =
+        data.name ||
+        data.username ||
+        peer?.name ||
+        peer?.username ||
+        (isHostJoining ? "Host" : "Participant");
+
+      toast.info(`${displayName} joined`, {
+        id: `user-joined-${userIdStr}`,
+      });
+    };
+
+    const handleUserLeft = (data: {
+      userId: string;
+      name?: string;
+      username?: string;
+    }) => {
+      const currentUserId = user?.id || (user as any)?._id;
+      if (currentUserId && String(data.userId) === String(currentUserId)) return;
+
+      const userIdStr = String(data.userId);
+      const now = Date.now();
+      const lastNotified = lastLeftToastRef.current.get(userIdStr) || 0;
+      if (now - lastNotified < 3000) return; // Ignore duplicate left events within 3 seconds
+      lastLeftToastRef.current.set(userIdStr, now);
+      lastJoinToastRef.current.delete(userIdStr);
+
+      const hostId = (meeting?.host?._id || meeting?.host)?.toString();
+      const isHostLeaving = hostId && userIdStr === String(hostId);
+      const peer = useMeetingStore
+        .getState()
+        .peers.find((p) => String(p.userId) === userIdStr);
+      const displayName =
+        data.name ||
+        data.username ||
+        peer?.name ||
+        peer?.username ||
+        (isHostLeaving ? "Host" : "Participant");
+
+      toast.info(`${displayName} left`, {
+        id: `user-left-${userIdStr}`,
+      });
+    };
+
     socket.on("meeting:screen-share-started", handleScreenStart);
     socket.on("meeting:screen-share-stopped", handleScreenStop);
     socket.on("meeting:recording-started", handleRecordStart);
     socket.on("meeting:recording-stopped", handleRecordStop);
+    socket.on("meeting:user-joined", handleUserJoined);
+    socket.on("meeting:user-left", handleUserLeft);
     socket.on("meeting:force-mute", handleForceMute);
     socket.on("meeting:force-mute-all", handleForceMute);
 
     return () => {
-      socket.off("meeting:joined", handleJoined);
       socket.off("meeting:screen-share-started", handleScreenStart);
       socket.off("meeting:screen-share-stopped", handleScreenStop);
       socket.off("meeting:recording-started", handleRecordStart);
       socket.off("meeting:recording-stopped", handleRecordStop);
+      socket.off("meeting:user-joined", handleUserJoined);
+      socket.off("meeting:user-left", handleUserLeft);
       socket.off("meeting:force-mute", handleForceMute);
       socket.off("meeting:force-mute-all", handleForceMute);
     };
-  }, [socket, setScreenSharingUserId, setRecordingState, isHost, id]);
+  }, [
+    socket,
+    setScreenSharingUserId,
+    setRecordingState,
+    isHost,
+    id,
+    user?.id,
+    meeting?.host,
+  ]);
 
   const handleLeave = async () => {
     if (isLeavingMeetingRef.current || isEndingMeetingRef.current) return;
@@ -319,18 +475,24 @@ export default function MeetingRoom() {
       await stopScreenShare();
     }
 
-    const shouldSaveRecording = isHost && (isRecording || isRecorderActive());
-    if (shouldSaveRecording) {
+    if (isRecorderActive()) {
       const toastId = toast.loading("Saving meeting recording... Please wait.");
       try {
         const result = await stopRecording(true);
         clearRecordedResult();
         setRecordingState(false);
-        socket?.emit("meeting:recording-stopped", { meetingId: id });
+        if (peers.length === 0) {
+          socket?.emit("meeting:recording-stopped", { meetingId: id });
+        }
         if (result && id) {
+          const currentCount = meeting?.recordings?.length || 0;
+          const partNumber = currentCount + 1;
+          const finalDuration = recordingStartTime
+            ? Math.max(result.duration, Math.round((Date.now() - recordingStartTime) / 1000))
+            : result.duration;
           await uploadMeetingRecording(id, result.blob, {
-            title: `${meeting?.title || "Meeting"} - Recording`,
-            duration: result.duration,
+            title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
+            duration: finalDuration,
             size: result.size,
           });
           toast.success("Recording saved to Meeting Details!", { id: toastId });
@@ -338,7 +500,7 @@ export default function MeetingRoom() {
           toast.dismiss(toastId);
         }
       } catch (err) {
-        console.error("Auto upload recording on leave:", err);
+        console.error("Save recording on leave error:", err);
         toast.error("Failed to save recording", { id: toastId });
       }
     }
@@ -371,8 +533,7 @@ export default function MeetingRoom() {
       await stopScreenShare();
     }
 
-    const shouldSaveRecording = isRecording || isRecorderActive();
-    if (shouldSaveRecording) {
+    if (isRecorderActive()) {
       const toastId = toast.loading("Saving meeting recording... Please wait.");
       try {
         const result = await stopRecording(true);
@@ -380,9 +541,14 @@ export default function MeetingRoom() {
         setRecordingState(false);
         socket?.emit("meeting:recording-stopped", { meetingId: id });
         if (result && id) {
+          const currentCount = meeting?.recordings?.length || 0;
+          const partNumber = currentCount + 1;
+          const finalDuration = recordingStartTime
+            ? Math.max(result.duration, Math.round((Date.now() - recordingStartTime) / 1000))
+            : result.duration;
           await uploadMeetingRecording(id, result.blob, {
-            title: `${meeting?.title || "Meeting"} - Recording`,
-            duration: result.duration,
+            title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
+            duration: finalDuration,
             size: result.size,
           });
           toast.success("Recording saved to Meeting Details!", { id: toastId });
@@ -393,6 +559,9 @@ export default function MeetingRoom() {
         console.error("Auto upload recording on end:", err);
         toast.error("Failed to save recording", { id: toastId });
       }
+    } else if (isRecording) {
+      setRecordingState(false);
+      socket?.emit("meeting:recording-stopped", { meetingId: id });
     }
 
     try {
@@ -461,9 +630,14 @@ export default function MeetingRoom() {
       socket?.emit("meeting:recording-stopped", { meetingId: id });
 
       if (result && id) {
+        const currentCount = meeting?.recordings?.length || 0;
+        const partNumber = currentCount + 1;
+        const finalDuration = recordingStartTime
+          ? Math.max(result.duration, Math.round((Date.now() - recordingStartTime) / 1000))
+          : result.duration;
         await uploadMeetingRecording(id, result.blob, {
-          title: `${meeting?.title || "Meeting"} - Recording`,
-          duration: result.duration,
+          title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
+          duration: finalDuration,
           size: result.size,
         });
         await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
@@ -488,10 +662,11 @@ export default function MeetingRoom() {
   // Confirmed start from Google Meet consent modal
   const handleConfirmStartRecording = async () => {
     try {
+      const now = Date.now();
       await startRecording();
-      setRecordingState(true, user?.id, user?.name, Date.now());
-      socket?.emit("meeting:recording-started", { meetingId: id });
-      toast.success("Recording started");
+      setRecordingState(true, user?.id, user?.name, now);
+      socket?.emit("meeting:recording-started", { meetingId: id, startedAt: now });
+      toast.success("Recording Started by Host");
     } catch (error) {
       console.error("Recording failed:", error);
       toast.error("Failed to start recording");
@@ -567,6 +742,12 @@ export default function MeetingRoom() {
       }
     : null;
 
+  const activeRecordingSeconds = recordingStartTime
+    ? Math.max(0, Math.floor((Date.now() - recordingStartTime) / 1000))
+    : isRecorderActive()
+    ? recordingTime
+    : remoteRecordingTime;
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
@@ -619,7 +800,7 @@ export default function MeetingRoom() {
               <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
               <span className="font-semibold tracking-wider">REC</span>
               <span className="font-mono text-white/90 text-[11px] pl-1.5 border-l border-red-500/30">
-                {formatTime(isHost ? recordingTime : remoteRecordingTime)}
+                {formatTime(activeRecordingSeconds)}
               </span>
             </div>
           )}
@@ -838,7 +1019,7 @@ export default function MeetingRoom() {
         onPauseRecording={pauseRecording}
         onResumeRecording={resumeRecording}
         isPaused={isPaused}
-        recordingTime={recordingTime}
+        recordingTime={activeRecordingSeconds}
       />
 
       {/* Google Meet Start Recording Confirmation Modal */}
@@ -854,7 +1035,7 @@ export default function MeetingRoom() {
         isOpen={isStopConfirmModalOpen}
         onContinue={handleContinueRecording}
         onDone={handleDoneRecording}
-        recordingTime={recordingTime}
+        recordingTime={activeRecordingSeconds}
         meetingTitle={meeting?.title}
         isSaving={isSavingRecording}
       />

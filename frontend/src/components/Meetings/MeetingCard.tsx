@@ -13,6 +13,7 @@ import {
   Loader2,
   Copy,
   Info,
+  Clock,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -153,10 +154,20 @@ export function MeetingCard({ meeting }: Props) {
           <div className="flex items-center gap-2 text-slate-700">
             <Calendar className="h-3.5 w-3.5 text-purple-600 shrink-0" />
             <span className="truncate">
-              {new Date(meeting.scheduledAt).toLocaleDateString(undefined, {
+              {new Date(meeting.startTime || meeting.scheduledAt).toLocaleDateString(undefined, {
                 month: "short",
                 day: "numeric",
               })}
+            </span>
+          </div>
+
+          {/* Schedule Time Window (Start Time — End Time or Open-ended) */}
+          <div className="flex items-center gap-2 text-slate-700 col-span-2 pt-1 border-t border-slate-200/70">
+            <Clock className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+            <span className="text-[11px] text-slate-600 truncate font-medium">
+              {new Date(meeting.startTime || meeting.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {" — "}
+              {meeting.endTime ? new Date(meeting.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Open-ended"}
             </span>
           </div>
 

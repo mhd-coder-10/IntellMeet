@@ -49,41 +49,46 @@ const notifyParticipants = async (meeting, hostId, type, title, message) => {
 }
 
 const createMeeting = async (userId, data) => {
-  const { title, description, scheduledAt, settings } = data
+  const { title, description, scheduledAt, startTime, endTime, settings } = data;
 
   if (!title) {
-    const error = new Error("Meeting title is required")
-    error.statusCode = 400
-    throw error
+    const error = new Error("Meeting title is required");
+    error.statusCode = 400;
+    throw error;
   }
 
-  const host = await userRepo.findById(userId)
+  const host = await userRepo.findById(userId);
   if (!host) {
-    const error = new Error("Host user not found")
-    error.statusCode = 404
-    throw error
+    const error = new Error("Host user not found");
+    error.statusCode = 404;
+    throw error;
   }
 
-  let meetingCode = generateMeetingCode()
-  let existing = await meetingRepo.findByCode(meetingCode)
+  let meetingCode = generateMeetingCode();
+  let existing = await meetingRepo.findByCode(meetingCode);
   while (existing) {
-    meetingCode = generateMeetingCode()
-    existing = await meetingRepo.findByCode(meetingCode)
+    meetingCode = generateMeetingCode();
+    existing = await meetingRepo.findByCode(meetingCode);
   }
+
+  const meetingStartTime = startTime ? new Date(startTime) : (scheduledAt ? new Date(scheduledAt) : new Date());
+  const meetingEndTime = endTime ? new Date(endTime) : null;
 
   const meeting = await meetingRepo.create({
     title,
     description: description || "",
     host: userId,
     meetingCode,
-    scheduledAt: scheduledAt || new Date(),
+    scheduledAt: meetingStartTime,
+    startTime: meetingStartTime,
+    endTime: meetingEndTime,
     settings: settings || {},
-  })
+  });
 
-  await deleteCacheByPattern(`user:${userId}:meetings`)
+  await deleteCacheByPattern(`user:${userId}:meetings`);
 
-  return { meeting }
-}
+  return { meeting };
+};
 
 const getMeetingById = async (meetingId, userId = null) => {
   if (userId) {
@@ -108,6 +113,15 @@ const getMeetingById = async (meetingId, userId = null) => {
       const error = new Error("Meeting not found or was deleted by you");
       error.statusCode = 404;
       throw error;
+    }
+    // Always inject live in-memory recording state before returning cached meeting
+    const roomRecordingUser = roomManager.getRecordingUser(meetingId);
+    const roomRecordingStartedAt = roomManager.getRecordingStartedAt(meetingId);
+    const isRecordingActive = Boolean(roomRecordingStartedAt);
+    if (cached.meeting) {
+      cached.meeting.isRecording = isRecordingActive;
+      cached.meeting.recordingStartedAt = isRecordingActive ? roomRecordingStartedAt : null;
+      cached.meeting.recordingUserId = roomRecordingUser || null;
     }
     return cached;
   }
@@ -168,9 +182,18 @@ const getMeetingById = async (meetingId, userId = null) => {
     throw error;
   }
 
-  const result = { meeting }
-  await setCache(cacheKey, result, 300)
-  return result
+  // Check live in-memory room recording state from roomManager
+  const roomRecordingUser = roomManager.getRecordingUser(meetingId);
+  const roomRecordingStartedAt = roomManager.getRecordingStartedAt(meetingId);
+  const isRecordingActive = Boolean(roomRecordingStartedAt);
+  const meetingObj = meeting.toObject ? meeting.toObject() : meeting;
+  meetingObj.isRecording = isRecordingActive;
+  meetingObj.recordingStartedAt = isRecordingActive ? roomRecordingStartedAt : null;
+  meetingObj.recordingUserId = roomRecordingUser || null;
+
+  const result = { meeting: meetingObj };
+  await setCache(cacheKey, result, 300);
+  return result;
 }
 
 const getMeetingByCode = async (code) => {
@@ -341,7 +364,18 @@ const joinMeeting = async (meetingId, userId) => {
 
   const hostId = (meeting.host?._id || meeting.host)?.toString();
   if (hostId === userId.toString()) {
-    return { meeting }
+    // Record first-time start timestamp when host joins call
+    if (!meeting.startedAt) {
+      const now = new Date();
+      await meetingRepo.updateById(meetingId, {
+        startedAt: now,
+        status: "ongoing",
+      });
+      await clearMeetingCaches(meetingId, userId);
+      meeting.startedAt = now;
+      meeting.status = "ongoing";
+    }
+    return { meeting };
   }
 
   const alreadyJoined = (meeting.participants || []).some(
@@ -419,10 +453,14 @@ const startMeeting = async (meetingId, userId) => {
     throw error
   }
 
-  const updated = await meetingRepo.updateById(meetingId, {
+  const updateData = {
     status: "ongoing",
-    startedAt: new Date(),
-  })
+  };
+  if (!meeting.startedAt) {
+    updateData.startedAt = new Date();
+  }
+
+  const updated = await meetingRepo.updateById(meetingId, updateData);
 
   await clearMeetingCaches(meetingId, userId)
 
@@ -446,11 +484,7 @@ const leaveMeeting = async (meetingId, userId) => {
   }
 
   const hostId = (meeting.host?._id || meeting.host)?.toString();
-  if (hostId === userId.toString()) {
-    const error = new Error("Host cannot leave. Please end the meeting");
-    error.statusCode = 400;
-    throw error;
-  }
+  const isHost = hostId === userId.toString();
 
   const user = await userRepo.findById(userId);
 
@@ -460,10 +494,26 @@ const leaveMeeting = async (meetingId, userId) => {
   const roomManager = require("../webrtc/roomManager");
   roomManager.removeUserFromRoom(meetingId, userId);
 
+  // Check if all participants (host + members) have now left
+  const remainingUsers = roomManager.getRoomUsers(meetingId);
+  if (remainingUsers.length === 0 && meeting.status === "ongoing") {
+    const nonHostParticipants = (meeting.participants || []).filter(
+      (p) => (p?._id || p)?.toString() !== hostId
+    );
+    const hasMembers = nonHostParticipants.length > 0;
+    const now = new Date();
+    await meetingRepo.updateById(meetingId, {
+      status: "completed",
+      endedAt: hasMembers ? now : null,
+      startedAt: hasMembers ? meeting.startedAt : null,
+    });
+    await clearMeetingCaches(meetingId, hostId);
+  }
+
   // Use $push / updateOne to avoid touching refreshToken
   if (user) {
-    const exists = user.attendedMeetings.find(
-      (a) => a.meeting.toString() === meetingId.toString()
+    const exists = (user.attendedMeetings || []).find(
+      (a) => a.meeting?.toString() === meetingId.toString()
     );
 
     if (exists) {
@@ -473,17 +523,19 @@ const leaveMeeting = async (meetingId, userId) => {
     }
   }
 
-  try {
-    await notificationService.createNotification({
-      recipient: meeting.host,
-      sender: userId,
-      type: "system",
-      title: "Member Left",
-      message: `${user?.name || "A member"} left your meeting "${meeting.title}"`,
-      link: `/meetings/${meetingId}`,
-    });
-  } catch (err) {
-    console.log("Leave notification error:", err.message);
+  if (!isHost) {
+    try {
+      await notificationService.createNotification({
+        recipient: meeting.host,
+        sender: userId,
+        type: "system",
+        title: "Member Left",
+        message: `${user?.name || "A member"} left your meeting "${meeting.title}"`,
+        link: `/meetings/${meetingId}`,
+      });
+    } catch (err) {
+      console.log("Leave notification error:", err.message);
+    }
   }
 
   return {
@@ -532,10 +584,20 @@ const endMeeting = async (meetingId, userId) => {
     }
   }
 
-  const updated = await meetingRepo.updateById(meetingId, {
+  const nonHostParticipants = (meeting.participants || []).filter(
+    (p) => (p?._id || p)?.toString() !== hostId
+  );
+  const hasMembers = nonHostParticipants.length > 0;
+
+  const updateData = {
     status: "completed",
-    endedAt: now,
-  });
+    endedAt: hasMembers ? now : null,
+  };
+  if (!hasMembers) {
+    updateData.startedAt = null;
+  }
+
+  const updated = await meetingRepo.updateById(meetingId, updateData);
 
   await clearMeetingCaches(meetingId, userId);
 
@@ -590,14 +652,13 @@ const uploadMeetingRecording = async (meetingId, userId, file, recordingUrl, met
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
-
     const filename = `recording-${meetingId}-${Date.now()}.webm`;
     const filePath = path.join(uploadDir, filename);
 
     // 1. Write file to disk immediately (takes <20ms for fast user response)
     fs.writeFileSync(filePath, file.buffer);
     finalUrl = `/uploads/recordings/${filename}`;
-    fileSize = file.size || file.buffer.length;
+    fileSize = file.buffer.length;
 
     // 2. Background sync to Cloudinary if configured (non-blocking)
     if (process.env.CLOUDINARY_API_KEY && process.env.ENABLE_CLOUDINARY_RECORDINGS === "true") {
@@ -608,7 +669,7 @@ const uploadMeetingRecording = async (meetingId, userId, file, recordingUrl, met
         .then(async (result) => {
           if (result?.secure_url) {
             console.log(`[MediaStorage] Background Cloudinary sync complete for meeting ${meetingId}`);
-            // Update the matching recording in recordings array
+            const Meeting = require("../models/Meeting");
             await Meeting.updateOne(
               { _id: meetingId, "recordings.url": finalUrl },
               { $set: { "recordings.$.url": result.secure_url } }
@@ -632,23 +693,11 @@ const uploadMeetingRecording = async (meetingId, userId, file, recordingUrl, met
     throw error;
   }
 
-  // Handle multiple recordings array without overwriting previous sessions
-  const existingRecordings = Array.isArray(meeting.recordings) ? [...meeting.recordings] : [];
-
-  // If there was an old recordingUrl but recordings array was empty, preserve it as Recording 1
-  if (existingRecordings.length === 0 && meeting.recordingUrl) {
-    existingRecordings.push({
-      url: meeting.recordingUrl,
-      title: `${meeting.title} - Recording 1`,
-      duration: 0,
-      size: 0,
-      createdAt: meeting.updatedAt || new Date(),
-    });
-  }
-
-  const recordingNumber = existingRecordings.length + 1;
+  // Append new recording to meeting recordings list so host can save multiple recordings
+  const currentRecordings = Array.isArray(meeting.recordings) ? meeting.recordings : [];
+  const nextIndex = currentRecordings.length + 1;
   const recordingTitle =
-    metadata.title || `${meeting.title} - Recording ${recordingNumber}`;
+    metadata.title || `${meeting.title} - Recording ${nextIndex}`;
 
   const newRecording = {
     url: finalUrl,
@@ -658,11 +707,11 @@ const uploadMeetingRecording = async (meetingId, userId, file, recordingUrl, met
     createdAt: new Date(),
   };
 
-  existingRecordings.push(newRecording);
+  const updatedRecordings = [...currentRecordings, newRecording];
 
   const updated = await meetingRepo.updateById(meetingId, {
     recordingUrl: finalUrl,
-    recordings: existingRecordings,
+    recordings: updatedRecordings,
     recordingDeletedByHost: false,
     isRecording: false,
   });

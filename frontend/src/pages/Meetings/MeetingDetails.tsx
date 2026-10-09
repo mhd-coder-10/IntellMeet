@@ -240,13 +240,15 @@ export default function MeetingDetails() {
     );
   }
 
-  const durationText = calculateDuration(meeting.startedAt, meeting.endedAt);
-  const meetingDateDay = formatDateAndDay(
-    meeting.startedAt || meeting.scheduledAt || meeting.createdAt
-  );
   // Members who joined this meeting (excluding host who has their own dedicated card)
   const memberParticipants = (meeting.participants || []).filter(
     (p) => p && p._id && p._id.toString() !== meeting.host?._id?.toString()
+  );
+  const hasOtherParticipants = memberParticipants.length > 0;
+
+  const durationText = calculateDuration(meeting.startedAt, meeting.endedAt);
+  const meetingDateDay = formatDateAndDay(
+    meeting.startTime || meeting.scheduledAt || meeting.createdAt
   );
 
   return (
@@ -331,7 +333,7 @@ export default function MeetingDetails() {
         </div>
 
         {/* Meeting Core Metadata Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {/* Date & Day */}
           <Card className="rounded-2xl border-slate-200/90 bg-white shadow-xs p-5 space-y-1">
             <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold">
@@ -340,6 +342,25 @@ export default function MeetingDetails() {
             </div>
             <p className="text-sm font-bold text-slate-900 pt-1">
               {meetingDateDay}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              Meeting date
+            </p>
+          </Card>
+
+          {/* Scheduled Time Window (Reference) */}
+          <Card className="rounded-2xl border-slate-200/90 bg-white shadow-xs p-5 space-y-1">
+            <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold">
+              <Clock className="w-4 h-4 text-indigo-600" />
+              <span>Scheduled Time</span>
+            </div>
+            <p className="text-sm font-bold text-slate-900 pt-1">
+              {formatTimeOnly(meeting.startTime || meeting.scheduledAt)}
+              {" — "}
+              {meeting.endTime ? formatTimeOnly(meeting.endTime) : "Open-ended"}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {meeting.endTime ? "Scheduled reference window" : "Open-ended reference"}
             </p>
           </Card>
 
@@ -350,12 +371,16 @@ export default function MeetingDetails() {
               <span>Started At</span>
             </div>
             <p className="text-base font-bold text-slate-900 pt-1">
-              {formatTimeOnly(meeting.startedAt)}
+              {hasOtherParticipants && meeting.startedAt
+                ? formatTimeOnly(meeting.startedAt)
+                : "--:--"}
             </p>
             <p className="text-[11px] text-slate-400">
-              {meeting.startedAt
-                ? "Host launched the call"
-                : "Scheduled (Not started)"}
+              {hasOtherParticipants
+                ? meeting.startedAt
+                  ? "Host launched the call"
+                  : "Scheduled (Not started)"
+                : "No other members joined"}
             </p>
           </Card>
 
@@ -366,10 +391,16 @@ export default function MeetingDetails() {
               <span>Ended At</span>
             </div>
             <p className="text-base font-bold text-slate-900 pt-1">
-              {formatTimeOnly(meeting.endedAt)}
+              {hasOtherParticipants && meeting.endedAt
+                ? formatTimeOnly(meeting.endedAt)
+                : "--:--"}
             </p>
             <p className="text-[11px] text-slate-400">
-              {meeting.endedAt ? "Host concluded call" : "Session active or scheduled"}
+              {hasOtherParticipants
+                ? meeting.endedAt
+                  ? "Host concluded call"
+                  : "Session active or scheduled"
+                : "No other members joined"}
             </p>
           </Card>
 
@@ -380,10 +411,14 @@ export default function MeetingDetails() {
               <span>Total Duration</span>
             </div>
             <p className="text-base font-bold text-slate-900 pt-1">
-              {durationText || (meeting.status === "ongoing" ? "In Progress" : "--")}
+              {hasOtherParticipants
+                ? durationText || (meeting.status === "ongoing" ? "In Progress" : "--")
+                : "--"}
             </p>
             <p className="text-[11px] text-slate-400">
-              Total active meeting duration
+              {hasOtherParticipants
+                ? "Total active meeting duration"
+                : "No other members joined"}
             </p>
           </Card>
         </div>
