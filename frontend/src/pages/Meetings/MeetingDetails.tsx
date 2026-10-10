@@ -34,6 +34,7 @@ import { useAuthStore } from "@/store/authStore";
 import { getErrorMessage } from "@/utils/errorHelper";
 import { getMediaUrl } from "@/utils/mediaUrl";
 import { TranscriptCard } from "@/components/Meetings/TranscriptCard";
+import { SummaryAndActionItemsCard } from "@/components/Meetings/SummaryAndActionItemsCard";
 import type { MeetingRecordingItem } from "@/types/meeting";
 
 // Format Date & Day: e.g. "Monday, October 6, 2026"
@@ -689,6 +690,14 @@ export default function MeetingDetails() {
               videoEl.play().catch(() => { });
             }
           }}
+        />
+
+        {/* AI Meeting Summary & Smart Action Items Section (Day 16) */}
+        <SummaryAndActionItemsCard
+          meetingId={meeting._id}
+          meetingTitle={meeting.title}
+          hasTranscript={true}
+          participants={[meeting.host, ...(meeting.participants || [])]}
         />
 
         {/* Members & Host Information */}
