@@ -33,6 +33,7 @@ import { getMeetingById, hideMeeting, deleteMeeting } from "@/services/meetingSe
 import { useAuthStore } from "@/store/authStore";
 import { getErrorMessage } from "@/utils/errorHelper";
 import { getMediaUrl } from "@/utils/mediaUrl";
+import { TranscriptCard } from "@/components/Meetings/TranscriptCard";
 import type { MeetingRecordingItem } from "@/types/meeting";
 
 // Format Date & Day: e.g. "Monday, October 6, 2026"
@@ -255,9 +256,9 @@ export default function MeetingDetails() {
     <div className="min-h-screen bg-[#f8fafc] text-slate-900 antialiased selection:bg-blue-100">
       <Header />
 
-      <main className="max-w-[1200px] mx-auto px-4 sm:px-6 md:px-8 py-8 space-y-8">
+      <main className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 py-6 space-y-6">
         {/* Navigation Breadcrumb & Actions Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/90 pb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/90 pb-4">
           <div>
             <div className="flex items-center gap-2 text-xs text-blue-600 font-semibold mb-1">
               <Link to="/dashboard" className="hover:underline">
@@ -278,13 +279,12 @@ export default function MeetingDetails() {
                 {meeting.title}
               </h1>
               <span
-                className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                  meeting.status === "ongoing"
+                className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${meeting.status === "ongoing"
                     ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                     : meeting.status === "completed"
-                    ? "bg-slate-100 text-slate-600 border border-slate-200"
-                    : "bg-blue-50 text-blue-700 border border-blue-200"
-                }`}
+                      ? "bg-slate-100 text-slate-600 border border-slate-200"
+                      : "bg-blue-50 text-blue-700 border border-blue-200"
+                  }`}
               >
                 {meeting.status === "ongoing" ? "Live Now" : meeting.status}
               </span>
@@ -424,12 +424,12 @@ export default function MeetingDetails() {
         </div>
 
         {/* Meeting Recording Section */}
-        <Card className="rounded-3xl border-slate-200/90 bg-white shadow-xs overflow-hidden">
-          <CardHeader className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <Card className="rounded-2xl border-slate-200/90 bg-white shadow-xs overflow-hidden">
+          <CardHeader className="p-3.5 sm:p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <PlayCircle className="w-5 h-5 text-blue-600" />
-                <CardTitle className="text-lg font-bold text-slate-900">
+                <CardTitle className="text-base sm:text-lg font-bold text-slate-900">
                   Meeting Recording
                 </CardTitle>
                 {meeting.recordingDeletedByHost ? (
@@ -446,8 +446,8 @@ export default function MeetingDetails() {
                 {meeting.recordingDeletedByHost
                   ? "The host has removed the media recording for this session."
                   : recordingsList.length > 1
-                  ? "Multiple recordings captured for this session. Click on any recording card to play it in the enlarged viewer."
-                  : "Session recording captured by the host. Click on the card below to play."}
+                    ? "Multiple recordings captured for this session. Click on any recording card to play it in the enlarged viewer."
+                    : "Session recording captured by the host. Click on the card below to play."}
               </p>
             </div>
 
@@ -466,18 +466,18 @@ export default function MeetingDetails() {
             </Button>
           </CardHeader>
 
-          <CardContent className="p-6">
+          <CardContent className="p-3.5 sm:p-4">
             {meeting.recordingDeletedByHost ? (
-              <div className="py-12 px-6 text-center space-y-3.5 max-w-lg mx-auto">
-                <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border border-amber-200/90 shadow-xs">
-                  <VideoOff className="w-8 h-8" />
+              <div className="py-5 px-4 text-center space-y-2 max-w-sm mx-auto">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border border-amber-200/90 shadow-xs">
+                  <VideoOff className="w-6 h-6" />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 uppercase tracking-wide">
                     <AlertTriangle className="w-3 h-3" />
                     Notice
                   </div>
-                  <h4 className="text-base font-bold text-slate-900">
+                  <h4 className="text-sm font-bold text-slate-900">
                     Recording deleted by the host
                   </h4>
                   <p className="text-xs text-slate-600 leading-relaxed max-w-md mx-auto">
@@ -486,7 +486,7 @@ export default function MeetingDetails() {
                 </div>
               </div>
             ) : recordingsList.length > 0 ? (
-              <div className="space-y-6">
+              <div className="space-y-5">
                 {/* Enlarged Video Player on Click (Exact large size as before) */}
                 {activeRecording && (
                   <div className="space-y-3 p-4 bg-slate-950 rounded-2xl border border-slate-800 shadow-2xl animate-in fade-in duration-300">
@@ -554,24 +554,22 @@ export default function MeetingDetails() {
                     </span>
                   </div>
 
-                  <div className={`grid gap-4 ${
-                    recordingsList.length === 1
+                  <div className={`grid gap-4 ${recordingsList.length === 1
                       ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 max-w-md"
                       : recordingsList.length === 2
-                      ? "grid-cols-1 sm:grid-cols-2 max-w-2xl"
-                      : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-                  }`}>
+                        ? "grid-cols-1 sm:grid-cols-2 max-w-2xl"
+                        : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+                    }`}>
                     {recordingsList.map((rec, idx) => {
                       const isPlaying = activeRecording?.url === rec.url;
                       return (
                         <div
                           key={rec.url || idx}
                           onClick={() => setActiveRecording(rec)}
-                          className={`group relative rounded-2xl border transition-all duration-200 cursor-pointer overflow-hidden p-3 flex flex-col justify-between gap-3 ${
-                            isPlaying
+                          className={`group relative rounded-2xl border transition-all duration-200 cursor-pointer overflow-hidden p-3 flex flex-col justify-between gap-3 ${isPlaying
                               ? "bg-blue-50/90 border-blue-500 shadow-md ring-2 ring-blue-400/40"
                               : "bg-slate-50/80 border-slate-200 hover:border-blue-400 hover:bg-white hover:shadow-md"
-                          }`}
+                            }`}
                         >
                           {/* Card Thumbnail / Mini Video Frame */}
                           <div className="relative aspect-video w-full rounded-xl bg-slate-900 overflow-hidden flex items-center justify-center border border-slate-800/80 shadow-inner group-hover:scale-[1.01] transition-transform">
@@ -585,18 +583,16 @@ export default function MeetingDetails() {
 
                             {/* Play Button Overlay */}
                             <div
-                              className={`absolute inset-0 flex items-center justify-center transition-all ${
-                                isPlaying
+                              className={`absolute inset-0 flex items-center justify-center transition-all ${isPlaying
                                   ? "bg-blue-900/40 backdrop-blur-[1px]"
                                   : "bg-black/35 group-hover:bg-black/15"
-                              }`}
+                                }`}
                             >
                               <div
-                                className={`w-11 h-11 rounded-full flex items-center justify-center transition-all shadow-lg ${
-                                  isPlaying
+                                className={`w-11 h-11 rounded-full flex items-center justify-center transition-all shadow-lg ${isPlaying
                                     ? "bg-blue-600 text-white scale-110 shadow-blue-500/50 ring-4 ring-blue-300/30"
                                     : "bg-white/95 text-slate-900 group-hover:scale-110 group-hover:bg-blue-600 group-hover:text-white"
-                                }`}
+                                  }`}
                               >
                                 <Play className="w-5 h-5 fill-current ml-0.5" />
                               </div>
@@ -648,16 +644,16 @@ export default function MeetingDetails() {
                 </div>
               </div>
             ) : (
-              <div className="py-12 text-center space-y-3.5 max-w-md mx-auto">
-                <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto border border-slate-200">
-                  <Video className="w-7 h-7" />
+              <div className="py-4 px-3 text-center space-y-2 max-w-xs mx-auto">
+                <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto border border-slate-200">
+                  <Video className="w-5 h-5" />
                 </div>
-                <div className="space-y-1">
-                  <h4 className="text-base font-semibold text-slate-800">
+                <div className="space-y-0.5">
+                  <h4 className="text-xs font-semibold text-slate-800">
                     No recording captured for this session
                   </h4>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    The host did not record this meeting, or the recording is still processing in the cloud.
+                  <p className="text-[11px] text-slate-500 leading-normal">
+                    The host did not record this meeting session.
                   </p>
                 </div>
                 <Button
@@ -665,7 +661,7 @@ export default function MeetingDetails() {
                   size="sm"
                   onClick={() => refetch()}
                   disabled={isFetching}
-                  className="rounded-xl text-xs h-8 px-3 gap-1.5 text-slate-600"
+                  className="rounded-xl text-xs h-7 px-3 gap-1.5 text-slate-600 mt-1"
                 >
                   <RefreshCw className={`w-3 h-3 ${isFetching ? "animate-spin" : ""}`} />
                   Check Again
@@ -675,10 +671,30 @@ export default function MeetingDetails() {
           </CardContent>
         </Card>
 
+        {/* AI Meeting Transcription Section (Day 15) */}
+        <TranscriptCard
+          meetingId={meeting._id}
+          meetingTitle={meeting.title}
+          meetingCode={meeting.meetingCode}
+          recordingIndex={
+            activeRecording
+              ? Math.max(0, recordingsList.findIndex((r) => r.url === activeRecording.url))
+              : 0
+          }
+          hasRecordings={recordingsList.length > 0}
+          onSeekToTime={(seconds) => {
+            const videoEl = document.querySelector("video[controls]") as HTMLVideoElement;
+            if (videoEl) {
+              videoEl.currentTime = seconds;
+              videoEl.play().catch(() => { });
+            }
+          }}
+        />
+
         {/* Members & Host Information */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Host Card */}
-          <Card className="rounded-2xl border-slate-200/90 bg-white shadow-xs p-6 space-y-4">
+          <Card className="rounded-2xl border-slate-200/90 bg-white shadow-xs p-4 sm:p-5 space-y-3">
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
               <Crown className="w-4 h-4 text-amber-500" />
               <span>Meeting Host</span>
@@ -703,7 +719,7 @@ export default function MeetingDetails() {
           </Card>
 
           {/* Participants Meeting Members Attendance List */}
-          <Card className="rounded-2xl border-slate-200/90 bg-white shadow-xs p-6 md:col-span-2 space-y-4">
+          <Card className="rounded-2xl border-slate-200/90 bg-white shadow-xs p-4 sm:p-5 md:col-span-2 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 <Users className="w-4 h-4 text-blue-600" />
