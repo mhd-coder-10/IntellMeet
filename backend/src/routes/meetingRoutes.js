@@ -86,7 +86,7 @@ router.get("/", protect, getUserMeetings);
  *       200:
  *         description: Meeting removed from list
  */
-router.delete("/:id/hide", protect, hideMeeting)
+router.delete("/:id/hide", protect, hideMeeting);
 
 /**
  * @swagger
@@ -267,4 +267,12 @@ router.post("/:id/end", protect, endMeeting);
 // Upload and save meeting recording
 router.post("/:id/recording", protect, uploadRecording.single("recording"), uploadMeetingRecording);
 
-module.exports = router
+// AI Transcription endpoints
+const aiController = require("../controllers/aiController");
+router.post("/:id/transcript/generate", protect, aiController.generateTranscript);
+router.get("/:id/transcript", protect, aiController.getTranscript);
+router.put("/:id/transcript", protect, aiController.updateTranscript);
+router.delete("/:id/transcript", protect, aiController.deleteTranscript);
+router.get("/:id/transcript/export", protect, aiController.exportTranscript);
+
+module.exports = router;

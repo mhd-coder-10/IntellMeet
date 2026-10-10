@@ -9,13 +9,14 @@ const userRoutes = require("./routes/userRoutes");
 const meetingRoutes = require("./routes/meetingRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
-
+const aiRoutes = require("./routes/aiRoutes");
 
 // Mount routes
 router.use("/auth", authRoutes);
 router.use("/users", userRoutes);
 router.use("/meetings", meetingRoutes);
-router.use("/chats", chatRoutes)
-router.use("/notifications", notificationRoutes)
+router.use("/chats", chatRoutes);
+router.use("/notifications", notificationRoutes);
+router.use("/ai", aiRoutes);
 
 module.exports = router;
