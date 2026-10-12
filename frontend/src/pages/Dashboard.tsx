@@ -20,8 +20,8 @@ import {
   Trash2,
   Loader2,
   RefreshCw,
+  FolderKanban,
 } from "lucide-react";
-import { Header } from "@/components/common/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -34,6 +34,7 @@ import {
   deleteMeeting,
 } from "@/services/meetingService";
 import { getErrorMessage } from "@/utils/errorHelper";
+import { ConfirmModal } from "@/components/common/ConfirmModal";
 
 export default function Dashboard() {
   const user = useAuthStore((state) => state.user);
@@ -68,23 +69,24 @@ export default function Dashboard() {
     staleTime: 30 * 1000,
   });
 
-  const handleRemoveMeeting = async (meetingId: string, isHostMeeting: boolean) => {
-    if (
-      !confirm(
-        "Remove this meeting from your dashboard? You will lose access to its details."
-      )
-    ) {
-      return;
-    }
-    setRemovingId(meetingId);
+  const [meetingToRemove, setMeetingToRemove] = useState<{
+    id: string;
+    isHost: boolean;
+    title: string;
+  } | null>(null);
+
+  const confirmRemoveMeeting = async () => {
+    if (!meetingToRemove) return;
+    setRemovingId(meetingToRemove.id);
     try {
-      if (isHostMeeting) {
-        await deleteMeeting(meetingId);
+      if (meetingToRemove.isHost) {
+        await deleteMeeting(meetingToRemove.id);
         toast.success("Meeting deleted permanently");
       } else {
-        await hideMeeting(meetingId);
+        await hideMeeting(meetingToRemove.id);
         toast.success("Meeting removed from your dashboard");
       }
+      setMeetingToRemove(null);
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -131,10 +133,8 @@ export default function Dashboard() {
     .toUpperCase();
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 antialiased selection:bg-blue-100">
-      <Header />
-
-      <main className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 py-6 sm:py-8 space-y-6 sm:space-y-8">
+    <div className="w-full max-w-full overflow-x-hidden min-w-0">
+      <main className="w-full px-4 sm:px-6 md:px-8 py-5 sm:py-8 space-y-6 sm:space-y-8 min-w-0">
         {/* Top Welcome & Identity Hero Banner */}
         <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-200/90 bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-white p-5 sm:p-8 lg:p-10 shadow-xs">
           {/* Subtle Ambient Glow */}
@@ -283,7 +283,7 @@ export default function Dashboard() {
         </div>
 
         {/* Feature Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
           <Link to="/meetings/create" className="group">
             <Card className="h-full border-slate-200/90 bg-white hover:bg-slate-50/80 hover:border-blue-300 hover:shadow-md transition-all duration-200 rounded-2xl shadow-xs cursor-pointer">
               <CardContent className="p-5 sm:p-6 space-y-3">
@@ -320,7 +320,25 @@ export default function Dashboard() {
             </Card>
           </Link>
 
-          <Link to="/meetings" className="group sm:col-span-2 lg:col-span-1">
+          <Link to="/teams" className="group">
+            <Card className="h-full border-slate-200/90 bg-white hover:bg-slate-50/80 hover:border-indigo-300 hover:shadow-md transition-all duration-200 rounded-2xl shadow-xs cursor-pointer">
+              <CardContent className="p-5 sm:p-6 space-y-3">
+                <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100 group-hover:scale-105 transition transform">
+                  <FolderKanban className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-slate-900 font-bold text-base group-hover:text-indigo-600 transition">
+                    Workspaces & Boards
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Collaborate with teammates on real-time Kanban sprint boards and action items.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link to="/meetings" className="group">
             <Card className="h-full border-slate-200/90 bg-white hover:bg-slate-50/80 hover:border-purple-300 hover:shadow-md transition-all duration-200 rounded-2xl shadow-xs cursor-pointer">
               <CardContent className="p-5 sm:p-6 space-y-3">
                 <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center border border-purple-100 group-hover:scale-105 transition transform">
@@ -456,7 +474,13 @@ export default function Dashboard() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleRemoveMeeting(meeting._id, isHost)}
+                            onClick={() =>
+                              setMeetingToRemove({
+                                id: meeting._id,
+                                isHost,
+                                title: meeting.title,
+                              })
+                            }
                             disabled={removingId === meeting._id}
                             className="border-red-200 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-xs px-2.5 h-8 font-medium"
                           >
@@ -491,6 +515,26 @@ export default function Dashboard() {
           )}
         </div>
       </main>
+
+      {/* Remove / Delete Meeting Confirmation Modal */}
+      <ConfirmModal
+        isOpen={Boolean(meetingToRemove)}
+        onClose={() => setMeetingToRemove(null)}
+        onConfirm={confirmRemoveMeeting}
+        isLoading={Boolean(removingId)}
+        variant="danger"
+        title={
+          meetingToRemove?.isHost
+            ? "Delete Meeting Permanently?"
+            : "Remove Meeting from Dashboard?"
+        }
+        description={
+          meetingToRemove?.isHost
+            ? `Are you sure you want to delete "${meetingToRemove?.title}"? All recordings and details will be permanently lost.`
+            : `Are you sure you want to remove "${meetingToRemove?.title}" from your dashboard list?`
+        }
+        confirmText={meetingToRemove?.isHost ? "Delete Meeting" : "Remove"}
+      />
     </div>
   );
 }

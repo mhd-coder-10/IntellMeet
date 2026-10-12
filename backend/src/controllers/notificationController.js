@@ -42,7 +42,23 @@ const markAllAsRead = async (req, res) => {
 
 const deleteNotification = async (req, res) => {
     try {
+        if (req.params.id === "clear-all" || req.params.id === "clear") {
+            const data = await notificationService.clearAllNotifications(req.user.id);
+            return res.status(200).json({ success: true, ...data });
+        }
         const data = await notificationService.deleteNotification(req.params.id, req.user.id);
+        res.status(200).json({ success: true, ...data })
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message,
+        })
+    }
+}
+
+const clearAllNotifications = async (req, res) => {
+    try {
+        const data = await notificationService.clearAllNotifications(req.user.id);
         res.status(200).json({ success: true, ...data })
     } catch (error) {
         res.status(error.statusCode || 500).json({
@@ -57,4 +73,5 @@ module.exports = {
     markAsRead,
     markAllAsRead,
     deleteNotification,
+    clearAllNotifications,
 }   

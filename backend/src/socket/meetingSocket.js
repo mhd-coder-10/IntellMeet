@@ -173,20 +173,7 @@ const registerMeetingHandlers = (io, socket) => {
         }
       }
 
-      if (!isHost) {
-        try {
-          await notificationService.createNotification({
-            recipient: meeting.host,
-            sender: socket.user.id,
-            type: "system",
-            title: "Member Joined",
-            message: `${socket.user.name} joined your meeting "${meeting.title}"`,
-            link: `/meetings/${meetingId}`,
-          });
-        } catch (err) {
-          console.log("Notification error:", err.message);
-        }
-      }
+      // Meeting room socket broadcast handles in-meeting participant presence
     } catch (err) {
       console.log("Meeting join error:", err.message);
       socket.emit("meeting:error", { message: "Failed to join meeting" });
@@ -208,18 +195,6 @@ const registerMeetingHandlers = (io, socket) => {
           await userRepo.updateAttendedMeeting(socket.user.id, meetingId);
         } catch (err) {}
         // Preserve participant in meeting attendance history
-        try {
-          await notificationService.createNotification({
-            recipient: meeting.host,
-            sender: socket.user.id,
-            type: "system",
-            title: "Member Left",
-            message: `${socket.user.name} left your meeting "${meeting.title}"`,
-            link: `/meetings/${meetingId}`,
-          });
-        } catch (err) {
-          console.log("Leave notification error:", err.message);
-        }
       }
 
       socket.leave(meetingId);
@@ -458,18 +433,6 @@ const registerMeetingHandlers = (io, socket) => {
             await userRepo.updateAttendedMeeting(socket.user.id, meetingId);
           } catch (err) {}
           // Preserve participant in meeting attendance history
-          try {
-            await notificationService.createNotification({
-              recipient: meeting.host,
-              sender: socket.user.id,
-              type: "system",
-              title: "Member Left",
-              message: `${socket.user.name} left your meeting "${meeting.title}"`,
-              link: `/meetings/${meetingId}`,
-            });
-          } catch (err) {
-            console.log("Disconnect notification error:", err.message);
-          }
         }
       } catch (err) {
         console.log("Disconnect cleanup error:", err.message);

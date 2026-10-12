@@ -22,9 +22,18 @@ const notificationSchema = new mongoose.Schema(
                 "meeting_invite",
                 "meeting_started",
                 "meeting_ended",
+                "meeting_updated",
                 "chat_mention",
                 "action_item",
                 "system",
+                "task_assigned",
+                "task_status",
+                "task_created",
+                "task_updated",
+                "task_deleted",
+                "task_comment",
+                "team_updated",
+                "project_updated",
             ],
             required: true,
         },
@@ -53,6 +62,9 @@ const notificationSchema = new mongoose.Schema(
     },
     { timestamps: true }
 )
+
+// Automatically remove notifications older than 10 days (10 days * 24h * 60m * 60s = 864,000s)
+notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 10 * 24 * 60 * 60 });
 
 const Notification = mongoose.model("Notification", notificationSchema)
 

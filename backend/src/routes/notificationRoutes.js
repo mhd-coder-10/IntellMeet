@@ -9,6 +9,7 @@ const {
   markAsRead,
   markAllAsRead,
   deleteNotification,
+  clearAllNotifications,
 } = require("../controllers/notificationController")
 
 const { protect } = require("../middleware/auth.middleware")
@@ -62,6 +63,19 @@ router.put("/read-all", protect, markAllAsRead)
  *         description: Not found
  */
 router.put("/:id/read", protect, markAsRead)
+
+/**
+ * @swagger
+ * /notifications/clear-all:
+ *   delete:
+ *     summary: Clear all notifications for user
+ *     tags: [Notifications]
+ *     responses:
+ *       200:
+ *         description: All notifications cleared
+ */
+router.delete("/clear-all", protect, clearAllNotifications)
+router.delete("/", protect, clearAllNotifications)
 
 /**
  * @swagger

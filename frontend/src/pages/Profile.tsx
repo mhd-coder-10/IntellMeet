@@ -20,7 +20,6 @@ import {
   Loader2,
   RefreshCw,
 } from "lucide-react";
-import { Header } from "@/components/common/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -243,10 +242,8 @@ export default function Profile() {
     avatarPreview || activeUser?.profilePicture || null;
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 antialiased selection:bg-blue-100">
-      <Header />
-
-      <main className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 py-6 sm:py-8 space-y-6 sm:space-y-8">
+    <div className="w-full max-w-full overflow-x-hidden min-w-0">
+      <main className="w-full px-4 sm:px-6 md:px-8 py-5 sm:py-8 space-y-6 sm:space-y-8 min-w-0">
         {/* Top Header & Breadcrumb */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/90 pb-6">
           <div>

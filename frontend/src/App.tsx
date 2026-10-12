@@ -8,8 +8,12 @@ import JoinMeeting from '@/pages/Meetings/JoinMeeting'
 import MeetingRoom from '@/pages/Meetings/MeetingRoom'
 import MeetingDetails from '@/pages/Meetings/MeetingDetails'
 import Profile from '@/pages/Profile'
+import TeamsList from '@/pages/Teams/TeamsList'
+import TeamDetail from '@/pages/Teams/TeamDetail'
+import ProjectBoard from '@/pages/Teams/ProjectBoard'
 import { ProtectedRoute } from '@/components/Auth/ProtectedRoute'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
+import { AppLayout } from '@/components/layout/AppLayout'
 
 function App() {
   useCurrentUser()
@@ -20,15 +24,24 @@ function App() {
       <Route path="/register" element={<Register />} />
 
       <Route element={<ProtectedRoute />}>
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/settings/profile" element={<Profile />} />
-        <Route path="/meetings" element={<MeetingList />} />
-        <Route path="/meetings/create" element={<CreateMeeting />} />
-        <Route path="/meetings/join" element={<JoinMeeting />} />
+        {/* Dedicated Fullscreen Meeting Room - No Header or Sidebar */}
         <Route path="/meetings/:id" element={<MeetingRoom />} />
-        <Route path="/meetings/:id/details" element={<MeetingDetails />} />
-        <Route path="/meetings/details/:id" element={<MeetingDetails />} />
+
+        {/* App Pages with Responsive Header, Hover-Sidebar and Dynamic Content Viewport */}
+        <Route element={<AppLayout />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/settings/profile" element={<Profile />} />
+          <Route path="/meetings" element={<MeetingList />} />
+          <Route path="/meetings/create" element={<CreateMeeting />} />
+          <Route path="/meetings/join" element={<JoinMeeting />} />
+          <Route path="/meetings/:id/details" element={<MeetingDetails />} />
+          <Route path="/meetings/details/:id" element={<MeetingDetails />} />
+          <Route path="/teams" element={<TeamsList />} />
+          <Route path="/teams/:id" element={<TeamDetail />} />
+          <Route path="/teams/:teamId/projects/:projectId" element={<ProjectBoard />} />
+          <Route path="/projects/:projectId" element={<ProjectBoard />} />
+        </Route>
       </Route>
 
       <Route path="/" element={<Navigate to="/dashboard" replace />} />

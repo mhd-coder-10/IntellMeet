@@ -45,6 +45,12 @@ class NotificationRepository extends BaseRepository {
             recipient: userId,
         })
     }
+
+    deleteAll(userId) {
+        return Notification.deleteMany({
+            recipient: userId,
+        })
+    }
 }
 
 module.exports = new NotificationRepository()

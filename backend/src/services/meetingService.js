@@ -278,7 +278,13 @@ const updateMeeting = async (meetingId, userId, updateData) => {
     throw error
   }
 
-  const allowedFields = ["title", "description", "scheduledAt", "settings"]
+  if (meeting.status === "completed" || meeting.status === "ended") {
+    const error = new Error("Completed meetings cannot be edited")
+    error.statusCode = 400
+    throw error
+  }
+
+  const allowedFields = ["title", "description", "scheduledAt", "startTime", "settings"]
   const updates = {}
 
   allowedFields.forEach((field) => {
@@ -287,11 +293,52 @@ const updateMeeting = async (meetingId, userId, updateData) => {
     }
   })
 
+  // Synchronize scheduledAt and startTime for scheduled meetings
+  if (updateData.scheduledAt) {
+    const parsedDate = new Date(updateData.scheduledAt);
+    updates.scheduledAt = parsedDate;
+    if (meeting.status === "scheduled" || !meeting.startedAt) {
+      updates.startTime = parsedDate;
+    }
+  } else if (updateData.startTime) {
+    const parsedDate = new Date(updateData.startTime);
+    updates.startTime = parsedDate;
+    if (meeting.status === "scheduled" || !meeting.startedAt) {
+      updates.scheduledAt = parsedDate;
+    }
+  }
+
   const updated = await meetingRepo.updateById(meetingId, updates)
+  const populated = await meetingRepo.findByIdPopulated(meetingId)
 
   await clearMeetingCaches(meetingId, userId)
 
-  return { meeting: updated }
+  // Notify participants of meeting updates
+  if (populated && Array.isArray(populated.participants)) {
+    try {
+      const User = require("../models/User");
+      const host = await User.findById(userId);
+      const hostName = host?.name || "The host";
+
+      for (const p of populated.participants) {
+        const pId = p.user?._id ? p.user._id.toString() : p.user ? p.user.toString() : null;
+        if (pId && pId !== userId.toString()) {
+          await notificationService.createNotification({
+            recipient: pId,
+            sender: userId,
+            type: "meeting_updated",
+            title: "Meeting Details Updated",
+            message: `${hostName} updated details for meeting "${populated.title}"`,
+            link: `/meetings/${populated._id}`,
+          });
+        }
+      }
+    } catch (nErr) {
+      console.warn("Meeting update notification error:", nErr.message);
+    }
+  }
+
+  return { meeting: populated || updated }
 }
 
 const deleteMeeting = async (meetingId, userId) => {
@@ -388,18 +435,7 @@ const joinMeeting = async (meetingId, userId) => {
     await meetingRepo.addParticipant(meetingId, userId)
     await clearMeetingCaches(meetingId, userId)
 
-    try {
-      await notificationService.createNotification({
-        recipient: meeting.host,
-        sender: userId,
-        type: "system",
-        title: "Participant Joined",
-        message: `${user?.name || "A member"} joined your meeting "${meeting.title}"`,
-        link: `/meetings/${meetingId}`,
-      })
-    } catch (err) {
-      console.log("Join notification error:", err.message)
-    }
+
   }
 
   // Also ensure participant is recorded in attendedMeetings
@@ -523,20 +559,7 @@ const leaveMeeting = async (meetingId, userId) => {
     }
   }
 
-  if (!isHost) {
-    try {
-      await notificationService.createNotification({
-        recipient: meeting.host,
-        sender: userId,
-        type: "system",
-        title: "Member Left",
-        message: `${user?.name || "A member"} left your meeting "${meeting.title}"`,
-        link: `/meetings/${meetingId}`,
-      });
-    } catch (err) {
-      console.log("Leave notification error:", err.message);
-    }
-  }
+
 
   return {
     message: "Left meeting successfully",

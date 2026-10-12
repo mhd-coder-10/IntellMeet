@@ -2,9 +2,9 @@
 // Displays start & end timestamps, duration, date, day, participant attendance list,
 // embedded video recording player (if recorded by host), and removal from dashboard
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Calendar,
@@ -24,17 +24,39 @@ import {
   VideoOff,
   AlertTriangle,
   RefreshCw,
+  Edit3,
 } from "lucide-react";
-import { Header } from "@/components/common/Header";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { getMeetingById, hideMeeting, deleteMeeting } from "@/services/meetingService";
+import {
+  getMeetingById,
+  hideMeeting,
+  deleteMeeting,
+  updateMeeting,
+} from "@/services/meetingService";
 import { useAuthStore } from "@/store/authStore";
+import { useSocket } from "@/hooks/useSocket";
 import { getErrorMessage } from "@/utils/errorHelper";
 import { getMediaUrl } from "@/utils/mediaUrl";
 import { TranscriptCard } from "@/components/Meetings/TranscriptCard";
 import { SummaryAndActionItemsCard } from "@/components/Meetings/SummaryAndActionItemsCard";
+import { ConfirmModal } from "@/components/common/ConfirmModal";
 import type { MeetingRecordingItem } from "@/types/meeting";
+
+// Helper to convert date to datetime-local input string in user local timezone
+const toLocalDatetimeInput = (dateInput?: string | Date | null) => {
+  if (!dateInput) return "";
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
 
 // Format Date & Day: e.g. "Monday, October 6, 2026"
 const formatDateAndDay = (isoString?: string | null) => {
@@ -112,8 +134,55 @@ export default function MeetingDetails() {
   const currentUser = useAuthStore((state) => state.user);
 
   const [isRemoving, setIsRemoving] = useState(false);
+  const [isRemoveConfirmOpen, setIsRemoveConfirmOpen] = useState(false);
   const [activeRecording, setActiveRecording] = useState<MeetingRecordingItem | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Edit Meeting Details Modal State
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editScheduledAt, setEditScheduledAt] = useState("");
+
+  // Live Socket Sync for meeting updates
+  const { socket } = useSocket();
+
+  useEffect(() => {
+    if (!socket || !id) return;
+    socket.emit("meeting:join", { meetingId: id });
+
+    const handleMeetingUpdated = (updatedData: any) => {
+      const actual = updatedData?.meeting || updatedData;
+      if (actual?._id === id || actual?.id === id) {
+        queryClient.setQueryData(["meeting", id], actual);
+        queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      }
+    };
+
+    socket.on("meeting:updated", handleMeetingUpdated);
+
+    return () => {
+      socket.off("meeting:updated", handleMeetingUpdated);
+    };
+  }, [socket, id, queryClient]);
+
+  const updateMeetingMutation = useMutation({
+    mutationFn: (data: {
+      title: string;
+      description: string;
+      scheduledAt?: string;
+      startTime?: string;
+    }) => updateMeeting(id!, data),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["meeting", id], updated);
+      queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      toast.success("Meeting details updated successfully!");
+      setIsEditModalOpen(false);
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || "Failed to update meeting");
+    },
+  });
 
   const {
     data: meeting,
@@ -174,15 +243,7 @@ export default function MeetingDetails() {
     toast.success(`Meeting code ${meeting.meetingCode} copied to clipboard!`);
   };
 
-  const handleRemove = async () => {
-    if (
-      !confirm(
-        "Are you sure you want to remove this meeting from your dashboard? You will lose access to its details and recording."
-      )
-    ) {
-      return;
-    }
-
+  const confirmRemoveMeeting = async () => {
     setIsRemoving(true);
     try {
       if (isHost && (meeting?.status === "completed" || meeting?.status === "cancelled")) {
@@ -192,6 +253,7 @@ export default function MeetingDetails() {
         await hideMeeting(meeting!._id);
         toast.success("Meeting removed from your dashboard");
       }
+      setIsRemoveConfirmOpen(false);
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
       navigate("/dashboard");
     } catch (err) {
@@ -220,22 +282,18 @@ export default function MeetingDetails() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#f8fafc] text-slate-900">
-        <Header />
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-          <p className="text-sm font-medium text-slate-500">
-            Loading meeting details...
-          </p>
-        </div>
+      <div className="w-full flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        <p className="text-sm font-medium text-slate-500">
+          Loading meeting details...
+        </p>
       </div>
     );
   }
 
   if (error || !meeting) {
     return (
-      <div className="min-h-screen bg-[#f8fafc] text-slate-900">
-        <Header />
+      <div className="w-full">
         <main className="max-w-2xl mx-auto px-4 py-16 text-center space-y-4">
           <div className="w-16 h-16 rounded-2xl bg-red-50 text-red-600 border border-red-100 flex items-center justify-center mx-auto">
             <AlertCircle className="w-8 h-8" />
@@ -271,10 +329,8 @@ export default function MeetingDetails() {
   );
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 antialiased selection:bg-blue-100">
-      <Header />
-
-      <main className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 py-6 space-y-6">
+    <div className="w-full max-w-full overflow-x-hidden min-w-0">
+      <main className="w-full px-4 sm:px-6 md:px-8 py-6 space-y-6 min-w-0">
         {/* Navigation Breadcrumb & Actions Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/90 pb-4">
           <div>
@@ -336,6 +392,25 @@ export default function MeetingDetails() {
               Refresh
             </Button>
 
+            {isHost && meeting.status !== "completed" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEditTitle(meeting.title || "");
+                  setEditDescription(meeting.description || "");
+                  setEditScheduledAt(
+                    toLocalDatetimeInput(meeting.scheduledAt || meeting.startTime)
+                  );
+                  setIsEditModalOpen(true);
+                }}
+                className="border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs h-9 px-3.5 shadow-xs"
+              >
+                <Edit3 className="w-3.5 h-3.5 mr-1.5 text-blue-600" />
+                Edit Details
+              </Button>
+            )}
+
             {meeting.status === "ongoing" && (
               <Link to={`/meetings/${meeting._id}`}>
                 <Button className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs h-9 px-4 font-semibold shadow-sm shadow-emerald-500/20">
@@ -347,7 +422,7 @@ export default function MeetingDetails() {
 
             <Button
               variant="destructive"
-              onClick={handleRemove}
+              onClick={() => setIsRemoveConfirmOpen(true)}
               disabled={isRemoving}
               className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 hover:border-red-300 rounded-xl text-xs h-9 px-3.5 shadow-none"
             >
@@ -814,6 +889,128 @@ export default function MeetingDetails() {
             )}
           </Card>
         </div>
+
+      {/* EDIT MEETING DETAILS MODAL */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+          <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-white p-6 sm:p-8 shadow-xl border border-slate-200 space-y-6">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                    Edit Meeting Details
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Update meeting title, description, and scheduled start time.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!editTitle.trim()) {
+                  toast.error("Meeting title is required");
+                  return;
+                }
+                const parsedIso = editScheduledAt ? new Date(editScheduledAt).toISOString() : undefined;
+                updateMeetingMutation.mutate({
+                  title: editTitle.trim(),
+                  description: editDescription.trim(),
+                  scheduledAt: parsedIso,
+                  startTime: parsedIso,
+                });
+              }}
+              className="space-y-4"
+            >
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Meeting Title *
+                </label>
+                <Input
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="e.g. Sprint Planning & Retrospective"
+                  className="h-11 rounded-xl text-sm"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Description
+                </label>
+                <textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder="Meeting agenda, goals, and preparation notes..."
+                  rows={3}
+                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Scheduled Start Time
+                </label>
+                <Input
+                  type="datetime-local"
+                  value={editScheduledAt}
+                  onChange={(e) => setEditScheduledAt(e.target.value)}
+                  className="h-11 rounded-xl text-xs sm:text-sm"
+                />
+                <span className="text-[11px] text-slate-400">
+                  Leave blank to keep original start time or leave as instant meeting.
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="rounded-xl border-slate-200 text-slate-600 text-xs h-10"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={updateMeetingMutation.isPending || !editTitle.trim()}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-xs h-10 px-5 shadow-xs"
+                >
+                  {updateMeetingMutation.isPending ? "Saving..." : "Save Changes"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE / REMOVE CONFIRMATION MODAL */}
+      <ConfirmModal
+        isOpen={isRemoveConfirmOpen}
+        onClose={() => setIsRemoveConfirmOpen(false)}
+        onConfirm={confirmRemoveMeeting}
+        isLoading={isRemoving}
+        variant="danger"
+        title={isHost ? "Delete Meeting Permanently?" : "Remove Meeting from Dashboard?"}
+        description={
+          isHost
+            ? "Are you sure you want to delete this meeting? All recordings, action items, and transcripts will be permanently removed."
+            : "Are you sure you want to remove this meeting from your dashboard? You will lose access to its details and recordings."
+        }
+        confirmText={isHost ? "Delete Meeting" : "Remove"}
+      />
       </main>
     </div>
   );
