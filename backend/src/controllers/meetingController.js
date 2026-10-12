@@ -68,6 +68,11 @@ const updateMeeting = async (req, res) => {
             req.user.id,
             req.body
         )
+        const io = req.app.get("io")
+        if (io) {
+            io.to(req.params.id).emit("meeting:updated", data.meeting)
+            io.emit("meeting:updated", { meetingId: req.params.id, meeting: data.meeting })
+        }
         res.status(200).json({
             success: true,
             message: "Meeting updated successfully",

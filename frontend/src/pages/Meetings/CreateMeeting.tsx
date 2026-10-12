@@ -19,7 +19,6 @@ import {
   Clock,
   CheckCircle2,
 } from "lucide-react";
-import { Header } from "@/components/common/Header";
 import {
   Dialog,
   DialogContent,
@@ -127,9 +126,7 @@ export default function CreateMeeting() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 antialiased selection:bg-blue-100">
-      <Header />
-
+    <div className="w-full">
       <main className="w-full max-w-3xl mx-auto px-4 sm:px-6 md:px-8 py-6 sm:py-10 space-y-6">
         {/* Breadcrumb Navigation */}
         <div className="flex items-center gap-2 text-xs text-blue-600 font-medium">

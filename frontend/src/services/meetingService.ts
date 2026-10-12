@@ -47,6 +47,20 @@ export const endMeeting = async (id: string): Promise<Meeting> => {
     return response.data.data.meeting
 }
 
+export const updateMeeting = async (
+    id: string,
+    payload: {
+        title?: string;
+        description?: string;
+        scheduledAt?: string;
+        startTime?: string;
+        settings?: any;
+    }
+): Promise<Meeting> => {
+    const response = await api.put(`/meetings/${id}`, payload)
+    return response.data.data.meeting
+}
+
 export const deleteMeeting = async (id: string): Promise<void> => {
     await api.delete(`/meetings/${id}`)
 }

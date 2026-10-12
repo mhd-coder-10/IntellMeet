@@ -7,6 +7,9 @@ const { registerMeetingHandlers } = require("./meetingSocket")
 const { registerChatHandlers } = require("./chatSocket")
 const { registerNotificationHandlers } = require("./notificationSocket")
 const { registerSignalingHandlers } = require("./webrtcSignaling")
+const { registerTeamHandlers } = require("./teamSocket")
+
+let ioInstance = null
 
 const initSocket = (httpServer) => {
   const io = new Server(httpServer, {
@@ -25,13 +28,17 @@ const initSocket = (httpServer) => {
     registerChatHandlers(io, socket)
     registerNotificationHandlers(io, socket)
     registerSignalingHandlers(io, socket)
+    registerTeamHandlers(io, socket)
 
     socket.on("disconnect", () => {
       console.log(`User disconnected: ${socket.user.username}`)
     })
   })
 
+  ioInstance = io
   return io
 }
 
-module.exports = { initSocket }
+const getIO = () => ioInstance
+
+module.exports = { initSocket, getIO }

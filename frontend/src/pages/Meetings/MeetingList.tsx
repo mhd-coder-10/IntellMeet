@@ -12,7 +12,6 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Header } from "@/components/common/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MeetingCard } from "@/components/Meetings/MeetingCard";
@@ -86,10 +85,8 @@ export default function MeetingList() {
   }, [meetings, searchTerm, statusFilter]);
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 antialiased selection:bg-blue-100">
-      <Header />
-
-      <main className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 py-6 sm:py-8 space-y-6">
+    <div className="w-full max-w-full overflow-x-hidden min-w-0">
+      <main className="w-full px-4 sm:px-6 md:px-8 py-5 sm:py-8 space-y-6 min-w-0">
         {/* Top Header & Actions */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/90 pb-6">
           <div>

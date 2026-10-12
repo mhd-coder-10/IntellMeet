@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/store/authStore";
 import { deleteMeeting, hideMeeting } from "@/services/meetingService";
 import { getErrorMessage } from "@/utils/errorHelper";
+import { ConfirmModal } from "@/components/common/ConfirmModal";
 import type { Meeting } from "@/types/meeting";
 
 interface Props {
@@ -52,6 +53,8 @@ const statusStyles = {
 
 export function MeetingCard({ meeting }: Props) {
   const [isLoading, setIsLoading] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isHideConfirmOpen, setIsHideConfirmOpen] = useState(false);
   const queryClient = useQueryClient();
   const currentUser = useAuthStore((state) => state.user);
 
@@ -75,15 +78,12 @@ export function MeetingCard({ meeting }: Props) {
     toast.success(`Code ${meeting.meetingCode} copied!`);
   };
 
-  const handleDelete = async () => {
-    if (!confirm("Delete this meeting permanently? This cannot be undone.")) {
-      return;
-    }
-
+  const confirmDelete = async () => {
     setIsLoading(true);
     try {
       await deleteMeeting(meeting._id);
       toast.success("Meeting deleted");
+      setIsDeleteConfirmOpen(false);
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -92,11 +92,12 @@ export function MeetingCard({ meeting }: Props) {
     }
   };
 
-  const handleHide = async () => {
+  const confirmHide = async () => {
     setIsLoading(true);
     try {
       await hideMeeting(meeting._id);
       toast.success("Removed from your list");
+      setIsHideConfirmOpen(false);
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -226,7 +227,7 @@ export function MeetingCard({ meeting }: Props) {
             <Button
               variant="outline"
               size="sm"
-              onClick={handleDelete}
+              onClick={() => setIsDeleteConfirmOpen(true)}
               disabled={isLoading}
               className="flex-1 h-9 rounded-xl text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200"
             >
@@ -242,7 +243,7 @@ export function MeetingCard({ meeting }: Props) {
           {canHide && (
             <Button
               variant="outline"
-              onClick={handleHide}
+              onClick={() => setIsHideConfirmOpen(true)}
               disabled={isLoading}
               className="flex-1 h-9 rounded-xl text-xs border-red-200 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700"
             >
@@ -258,6 +259,30 @@ export function MeetingCard({ meeting }: Props) {
           )}
         </div>
       </CardContent>
+
+      {/* Delete Meeting Confirm Modal */}
+      <ConfirmModal
+        isOpen={isDeleteConfirmOpen}
+        onClose={() => setIsDeleteConfirmOpen(false)}
+        onConfirm={confirmDelete}
+        isLoading={isLoading}
+        variant="danger"
+        title="Delete Meeting Permanently?"
+        description={`Are you sure you want to delete "${meeting.title}"? All recordings, action items, and data will be permanently removed.`}
+        confirmText="Delete Meeting"
+      />
+
+      {/* Remove Meeting Confirm Modal */}
+      <ConfirmModal
+        isOpen={isHideConfirmOpen}
+        onClose={() => setIsHideConfirmOpen(false)}
+        onConfirm={confirmHide}
+        isLoading={isLoading}
+        variant="warning"
+        title="Remove from Dashboard?"
+        description={`Remove "${meeting.title}" from your dashboard list? You will lose access to its details.`}
+        confirmText="Remove"
+      />
     </Card>
   );
 }
