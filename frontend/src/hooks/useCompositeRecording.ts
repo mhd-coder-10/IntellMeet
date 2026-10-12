@@ -991,8 +991,9 @@ export function useCompositeRecording() {
         }
 
         // Draw Google Meet Top Bar overlay
+        const currentPause = pauseStartRef.current > 0 ? (Date.now() - pauseStartRef.current) : 0;
         const elapsed = Math.floor(
-          (Date.now() - recordingStartRef.current - pausedTimeRef.current) / 1000
+          (Date.now() - recordingStartRef.current - pausedTimeRef.current - currentPause) / 1000
         );
         drawTopBarOverlay(
           ctx,
@@ -1134,9 +1135,24 @@ export function useCompositeRecording() {
   const pauseRecording = useCallback(() => {
     if (!isRecording || isPaused || !mediaRecorderRef.current) return;
     if (mediaRecorderRef.current.state === "recording") {
-      mediaRecorderRef.current.pause();
+      try {
+        mediaRecorderRef.current.pause();
+      } catch (err) {
+        console.warn("MediaRecorder pause warning:", err);
+      }
       pauseStartRef.current = Date.now();
       setIsPaused(true);
+
+      // Mute master audio gain & disable destination tracks so NO voice is captured during pause
+      if (masterGainRef.current) {
+        masterGainRef.current.gain.value = 0;
+      }
+      if (destinationRef.current?.stream) {
+        destinationRef.current.stream.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
+
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -1148,12 +1164,27 @@ export function useCompositeRecording() {
   const resumeRecording = useCallback(() => {
     if (!isRecording || !isPaused || !mediaRecorderRef.current) return;
     if (mediaRecorderRef.current.state === "paused") {
-      mediaRecorderRef.current.resume();
+      try {
+        mediaRecorderRef.current.resume();
+      } catch (err) {
+        console.warn("MediaRecorder resume warning:", err);
+      }
       if (pauseStartRef.current > 0) {
         pausedTimeRef.current += Date.now() - pauseStartRef.current;
         pauseStartRef.current = 0;
       }
       setIsPaused(false);
+
+      // Restore master audio gain & re-enable destination audio tracks
+      if (masterGainRef.current) {
+        masterGainRef.current.gain.value = 1;
+      }
+      if (destinationRef.current?.stream) {
+        destinationRef.current.stream.getAudioTracks().forEach((track) => {
+          track.enabled = true;
+        });
+      }
+
       timerRef.current = setInterval(() => {
         setRecordingTime((prev) => prev + 1);
       }, 1000);
@@ -1229,6 +1260,10 @@ export function useCompositeRecording() {
         const format = chosenFormatRef.current;
         const actualMime = recorder.mimeType || format.mimeType;
         const rawBlob = new Blob(chunksRef.current, { type: actualMime });
+        if (pauseStartRef.current > 0) {
+          pausedTimeRef.current += Date.now() - pauseStartRef.current;
+          pauseStartRef.current = 0;
+        }
         const durationMs = Math.max(
           Date.now() - recordingStartRef.current - pausedTimeRef.current,
           1000

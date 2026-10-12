@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   Video,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { Header } from "@/components/common/Header";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,22 @@ export default function Profile() {
 
   // Active sub-tab
   const [activeTab, setActiveTab] = useState<"general" | "security">("general");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["userProfile"] }),
+        queryClient.invalidateQueries({ queryKey: ["currentUser"] }),
+      ]);
+      toast.success("Profile data refreshed!");
+    } catch {
+      toast.error("Failed to refresh profile");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Profile Form State
   const [name, setName] = useState("");
@@ -249,7 +266,19 @@ export default function Profile() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs rounded-xl shadow-xs"
+              title="Refresh profile data"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isRefreshing ? "animate-spin text-blue-600" : "text-slate-500"}`} />
+              Refresh
+            </Button>
+
             <Link to="/meetings">
               <Button
                 variant="outline"

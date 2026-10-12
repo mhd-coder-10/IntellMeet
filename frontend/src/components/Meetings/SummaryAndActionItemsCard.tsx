@@ -26,7 +26,6 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   getMeetingSummary,
   generateMeetingSummary,
@@ -45,6 +44,7 @@ import type {
 interface Props {
   meetingId: string;
   meetingTitle?: string;
+  hasRecordings?: boolean;
   hasTranscript?: boolean;
   participants?: Array<{ _id: string; name: string; username: string }>;
 }
@@ -52,10 +52,12 @@ interface Props {
 export function SummaryAndActionItemsCard({
   meetingId,
   meetingTitle = "Meeting",
+  hasRecordings = true,
   hasTranscript = false,
   participants = [],
 }: Props) {
   const queryClient = useQueryClient();
+  const canGenerate = Boolean(hasRecordings || hasTranscript);
   const [isCopied, setIsCopied] = useState(false);
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [newTask, setNewTask] = useState("");
@@ -275,12 +277,10 @@ export function SummaryAndActionItemsCard({
   const completionPercentage = useMemo(() => {
     if (actionItems.length === 0) return 0;
     return Math.round((completedCount / actionItems.length) * 100);
-  }, [completedCount, actionItems.length]);
-
-  return (
-    <Card className="rounded-2xl border-slate-200 shadow-sm overflow-hidden bg-white">
+  }, [completedCount, actionItems.length]); return (
+    <div className="rounded-2xl border border-slate-200 shadow-sm overflow-hidden bg-white">
       {/* Header Bar */}
-      <CardHeader className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white p-3.5 sm:p-4 border-b border-slate-800">
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white p-3.5 sm:p-4 border-b border-slate-800">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-400/30 flex items-center justify-center text-purple-300 shadow-inner">
@@ -288,9 +288,9 @@ export function SummaryAndActionItemsCard({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <CardTitle className="text-sm sm:text-base font-semibold text-white tracking-wide">
+                <h3 className="text-sm sm:text-base font-semibold text-white tracking-wide">
                   AI Meeting Summary & Action Items
-                </CardTitle>
+                </h3>
                 <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-500/25 border border-purple-400/30 text-purple-200">
                   <Cpu className="w-2.5 h-2.5" />
                   AI Intelligence
@@ -343,9 +343,16 @@ export function SummaryAndActionItemsCard({
 
             <Button
               size="sm"
-              onClick={() => generateMutation.mutate()}
-              disabled={generateMutation.isPending || isLoading}
-              className="h-8 px-3 text-xs bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-medium rounded-lg shadow-sm gap-1.5 transition-all"
+              onClick={() => {
+                if (!canGenerate) {
+                  toast.error("Please record the meeting first to generate summary.");
+                  return;
+                }
+                generateMutation.mutate();
+              }}
+              disabled={generateMutation.isPending || isLoading || (!canGenerate && !summary)}
+              title={!canGenerate && !summary ? "Recording required to generate summary" : undefined}
+              className="h-8 px-3 text-xs bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg shadow-sm gap-1.5 transition-all"
             >
               {generateMutation.isPending ? (
                 <>
@@ -400,9 +407,9 @@ export function SummaryAndActionItemsCard({
             </span>
           </div>
         )}
-      </CardHeader>
+      </div>
 
-      <CardContent className="p-3.5 sm:p-5">
+      <div className="p-3.5 sm:p-5">
         {isLoading ? (
           <div className="py-8 flex flex-col items-center justify-center text-slate-400 gap-2.5">
             <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
@@ -411,38 +418,54 @@ export function SummaryAndActionItemsCard({
         ) : !summary ? (
           /* Empty State: Not generated yet */
           <div className="py-5 px-3 text-center max-w-sm mx-auto space-y-2.5">
-            <div className="w-10 h-10 mx-auto rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600 shadow-xs">
-              <Sparkles className="w-5 h-5 text-purple-600" />
-            </div>
-            <div className="space-y-0.5">
-              <h3 className="text-xs sm:text-sm font-semibold text-slate-800">
-                No Summary Generated Yet
-              </h3>
-              <p className="text-[11px] text-slate-500 leading-normal">
-                {hasTranscript
-                  ? "Generate an executive recap, key discussion takeaways, and smart action items from this meeting."
-                  : "Meeting speech transcript is recommended first to generate high-accuracy summaries."}
-              </p>
-            </div>
-            <div className="pt-1 flex justify-center">
-              <Button
-                onClick={() => generateMutation.mutate()}
-                disabled={generateMutation.isPending}
-                className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-4 py-2 h-8 rounded-xl shadow gap-1.5"
-              >
-                {generateMutation.isPending ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Extracting Summary...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Generate AI Summary & Tasks
-                  </>
-                )}
-              </Button>
-            </div>
+            {!canGenerate ? (
+              <>
+                <div className="w-10 h-10 mx-auto rounded-xl bg-amber-50 border border-amber-200/80 flex items-center justify-center text-amber-600 shadow-xs">
+                  <Sparkles className="w-5 h-5 text-amber-600" />
+                </div>
+                <div className="space-y-0.5">
+                  <h3 className="text-xs sm:text-sm font-semibold text-slate-800">
+                    No Recording Available
+                  </h3>
+                  <p className="text-[11px] text-slate-500 leading-normal">
+                    Record a meeting session first to generate an executive AI summary and smart action items.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="w-10 h-10 mx-auto rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600 shadow-xs">
+                  <Sparkles className="w-5 h-5 text-purple-600" />
+                </div>
+                <div className="space-y-0.5">
+                  <h3 className="text-xs sm:text-sm font-semibold text-slate-800">
+                    No Summary Generated Yet
+                  </h3>
+                  <p className="text-[11px] text-slate-500 leading-normal">
+                    Generate an executive recap, key discussion takeaways, and smart action items from this meeting.
+                  </p>
+                </div>
+                <div className="pt-1 flex justify-center">
+                  <Button
+                    onClick={() => generateMutation.mutate()}
+                    disabled={generateMutation.isPending}
+                    className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-4 py-2 h-8 rounded-xl shadow gap-1.5"
+                  >
+                    {generateMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Extracting Summary...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        Generate Summary & Tasks
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         ) : (
           /* Active Summary & Action Items View */
@@ -698,11 +721,10 @@ export function SummaryAndActionItemsCard({
                     return (
                       <div
                         key={item._id}
-                        className={`group p-3 rounded-xl border transition-all duration-200 flex items-start gap-2.5 ${
-                          isDone
-                            ? "bg-slate-50/80 border-slate-200/80 opacity-75"
-                            : "bg-white border-slate-200 hover:border-purple-300 hover:shadow-xs"
-                        }`}
+                        className={`group p-3 rounded-xl border transition-all duration-200 flex items-start gap-2.5 ${isDone
+                          ? "bg-slate-50/80 border-slate-200/80 opacity-75"
+                          : "bg-white border-slate-200 hover:border-purple-300 hover:shadow-xs"
+                          }`}
                       >
                         {/* Checkbox */}
                         <button
@@ -720,11 +742,10 @@ export function SummaryAndActionItemsCard({
                         {/* Task Content */}
                         <div className="flex-1 min-w-0 space-y-1">
                           <p
-                            className={`text-xs leading-relaxed font-medium transition ${
-                              isDone
-                                ? "line-through text-slate-400"
-                                : "text-slate-800"
-                            }`}
+                            className={`text-xs leading-relaxed font-medium transition ${isDone
+                              ? "line-through text-slate-400"
+                              : "text-slate-800"
+                              }`}
                           >
                             {item.task}
                           </p>
@@ -738,15 +759,14 @@ export function SummaryAndActionItemsCard({
 
                             {/* Priority Badge */}
                             <span
-                              className={`px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider ${
-                                item.priority === "urgent"
-                                  ? "bg-red-50 text-red-700 border border-red-200"
-                                  : item.priority === "high"
+                              className={`px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider ${item.priority === "urgent"
+                                ? "bg-red-50 text-red-700 border border-red-200"
+                                : item.priority === "high"
                                   ? "bg-rose-50 text-rose-700 border border-rose-200"
                                   : item.priority === "medium"
-                                  ? "bg-amber-50 text-amber-700 border border-amber-200"
-                                  : "bg-slate-100 text-slate-600 border border-slate-200"
-                              }`}
+                                    ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                    : "bg-slate-100 text-slate-600 border border-slate-200"
+                                }`}
                             >
                               {item.priority}
                             </span>
@@ -786,7 +806,7 @@ export function SummaryAndActionItemsCard({
             </div>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

@@ -145,18 +145,29 @@ export function MeetingControls({
       </Button>
 
       {isHost && onToggleRecording && (
-        <div className="flex items-center gap-1 bg-gray-800/80 p-1 rounded-full border border-gray-700/50">
+        <div className={`flex items-center gap-1 p-1 rounded-full border transition-all ${
+          isRecording && isPaused
+            ? "bg-amber-950/40 border-amber-500/40"
+            : "bg-gray-800/80 border-gray-700/50"
+        }`}>
           <Button
-            variant={isRecording ? "destructive" : "secondary"}
+            variant={isRecording ? (isPaused ? "secondary" : "destructive") : "secondary"}
             size="lg"
             onClick={onToggleRecording}
-            title={isRecording ? "Stop recording" : "Record meeting"}
-            className="rounded-full px-4 h-10 gap-2 font-medium"
+            title={isRecording ? (isPaused ? "Stop recording (Paused)" : "Stop recording") : "Record meeting"}
+            className={`rounded-full px-4 h-10 gap-2 font-medium transition-all ${
+              isRecording && isPaused
+                ? "bg-amber-500/20 text-amber-200 border border-amber-500/40 hover:bg-amber-500/30"
+                : ""
+            }`}
           >
             {isRecording ? (
               <>
-                <Square className="h-3.5 w-3.5 fill-current" />
-                <span className="text-xs font-mono">{formatTime(recordingTime)}</span>
+                <Square className={`h-3.5 w-3.5 fill-current ${isPaused ? "text-amber-400" : ""}`} />
+                <span className="text-xs font-mono">
+                  {formatTime(recordingTime)}
+                  {isPaused ? " (Paused)" : ""}
+                </span>
               </>
             ) : (
               <>
@@ -172,10 +183,14 @@ export function MeetingControls({
               size="sm"
               onClick={isPaused ? onResumeRecording : onPauseRecording}
               title={isPaused ? "Resume recording" : "Pause recording"}
-              className="rounded-full h-8 w-8 p-0 text-gray-300 hover:text-white hover:bg-gray-700"
+              className={`rounded-full h-8 w-8 p-0 transition-all ${
+                isPaused
+                  ? "text-emerald-400 bg-emerald-500/20 hover:bg-emerald-500/30 hover:text-emerald-300 ring-1 ring-emerald-400/40"
+                  : "text-gray-300 hover:text-white hover:bg-gray-700"
+              }`}
             >
               {isPaused ? (
-                <Play className="h-3.5 w-3.5 fill-current" />
+                <Play className="h-3.5 w-3.5 fill-current ml-0.5" />
               ) : (
                 <Pause className="h-3.5 w-3.5" />
               )}

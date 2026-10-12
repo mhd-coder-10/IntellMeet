@@ -503,7 +503,7 @@ const leaveMeeting = async (meetingId, userId) => {
     const hasMembers = nonHostParticipants.length > 0;
     const now = new Date();
     await meetingRepo.updateById(meetingId, {
-      status: "completed",
+      status: hasMembers ? "completed" : "scheduled",
       endedAt: hasMembers ? now : null,
       startedAt: hasMembers ? meeting.startedAt : null,
     });
@@ -590,12 +590,10 @@ const endMeeting = async (meetingId, userId) => {
   const hasMembers = nonHostParticipants.length > 0;
 
   const updateData = {
-    status: "completed",
+    status: hasMembers ? "completed" : "scheduled",
     endedAt: hasMembers ? now : null,
+    startedAt: hasMembers ? meeting.startedAt : null,
   };
-  if (!hasMembers) {
-    updateData.startedAt = null;
-  }
 
   const updated = await meetingRepo.updateById(meetingId, updateData);
 

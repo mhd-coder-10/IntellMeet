@@ -146,7 +146,27 @@ const clearRecordingUser = (meetingId) => {
   if (!room) return null;
   room.recordingUserId = null;
   room.recordingStartedAt = null;
+  room.isRecordingPaused = false;
+  room.recordingPausedSeconds = 0;
   return room;
+};
+
+// Set recording paused state
+const setRecordingPaused = (meetingId, isPaused, currentSeconds = 0) => {
+  const room = activeRooms.get(meetingId);
+  if (!room) return null;
+  room.isRecordingPaused = Boolean(isPaused);
+  room.recordingPausedSeconds = isPaused ? Number(currentSeconds) || 0 : 0;
+  return room;
+};
+
+// Get recording paused state
+const getRecordingPausedState = (meetingId) => {
+  const room = activeRooms.get(meetingId);
+  return {
+    isPaused: Boolean(room?.isRecordingPaused),
+    currentSeconds: room?.recordingPausedSeconds || 0,
+  };
 };
 
 // Get who is recording
@@ -192,6 +212,8 @@ module.exports = {
   clearRecordingUser,
   getRecordingUser,
   getRecordingStartedAt,
+  setRecordingPaused,
+  getRecordingPausedState,
   getActiveRoomsCount,
   getAllRooms,
 };

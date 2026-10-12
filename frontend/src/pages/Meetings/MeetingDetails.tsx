@@ -20,7 +20,6 @@ import {
   AlertCircle,
   PlayCircle,
   Play,
-  Download,
   X,
   VideoOff,
   AlertTriangle,
@@ -28,7 +27,7 @@ import {
 } from "lucide-react";
 import { Header } from "@/components/common/Header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { getMeetingById, hideMeeting, deleteMeeting } from "@/services/meetingService";
 import { useAuthStore } from "@/store/authStore";
 import { getErrorMessage } from "@/utils/errorHelper";
@@ -114,6 +113,7 @@ export default function MeetingDetails() {
 
   const [isRemoving, setIsRemoving] = useState(false);
   const [activeRecording, setActiveRecording] = useState<MeetingRecordingItem | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const {
     data: meeting,
@@ -198,6 +198,23 @@ export default function MeetingDetails() {
       toast.error(getErrorMessage(err));
     } finally {
       setIsRemoving(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["meeting", id] }),
+        queryClient.invalidateQueries({ queryKey: ["meeting-transcript", id] }),
+        queryClient.invalidateQueries({ queryKey: ["meeting-summary", id] }),
+      ]);
+      await refetch();
+      toast.success("Meeting details refreshed!");
+    } catch {
+      toast.error("Failed to refresh meeting details");
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -307,6 +324,17 @@ export default function MeetingDetails() {
                 Dashboard
               </Button>
             </Link>
+
+            <Button
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs h-9 px-3.5 shadow-xs"
+              title="Refresh meeting details"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isRefreshing ? "animate-spin text-blue-600" : "text-slate-500"}`} />
+              Refresh
+            </Button>
 
             {meeting.status === "ongoing" && (
               <Link to={`/meetings/${meeting._id}`}>
@@ -425,49 +453,63 @@ export default function MeetingDetails() {
         </div>
 
         {/* Meeting Recording Section */}
-        <Card className="rounded-2xl border-slate-200/90 bg-white shadow-xs overflow-hidden">
-          <CardHeader className="p-3.5 sm:p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <PlayCircle className="w-5 h-5 text-blue-600" />
-                <CardTitle className="text-base sm:text-lg font-bold text-slate-900">
-                  Meeting Recording
-                </CardTitle>
-                {meeting.recordingDeletedByHost ? (
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                    Recording Deleted by Host
-                  </span>
-                ) : recordingsList.length > 0 ? (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    {recordingsList.length} Recording{recordingsList.length > 1 ? "s" : ""} Available
-                  </span>
-                ) : null}
+        <div className="rounded-2xl border border-slate-200 shadow-sm overflow-hidden bg-white">
+          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-blue-950 text-white p-3.5 sm:p-4 border-b border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-300 shadow-inner">
+                  <PlayCircle className="w-4 h-4 text-blue-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm sm:text-base font-semibold text-white tracking-wide">
+                      Meeting Recording
+                    </h3>
+                    {meeting.recordingDeletedByHost ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/25 border border-amber-400/30 text-amber-200">
+                        Recording Deleted
+                      </span>
+                    ) : recordingsList.length > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/25 border border-emerald-400/30 text-emerald-200">
+                        {recordingsList.length} Recording{recordingsList.length > 1 ? "s" : ""} Available
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-400/25 text-blue-200">
+                        Media Capture
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-300/80 mt-0.5">
+                    {meeting.recordingDeletedByHost
+                      ? "The host has removed the media recording for this session."
+                      : recordingsList.length > 1
+                        ? "Multiple recordings captured for this session. Click on any recording card to play."
+                        : "Session media recording captured by the host during the live meeting."}
+                  </p>
+                </div>
               </div>
-              <p className="text-xs text-slate-500">
-                {meeting.recordingDeletedByHost
-                  ? "The host has removed the media recording for this session."
-                  : recordingsList.length > 1
-                    ? "Multiple recordings captured for this session. Click on any recording card to play it in the enlarged viewer."
-                    : "Session recording captured by the host. Click on the card below to play."}
-              </p>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    refetch();
+                    toast.info("Checking for recording updates...");
+                  }}
+                  disabled={isFetching}
+                  className="h-8 px-2.5 text-xs bg-slate-800/80 hover:bg-slate-700 text-slate-200 border-slate-700 rounded-lg gap-1.5 transition-all"
+                  title="Check for newly uploaded recordings"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`} />
+                  <span>Refresh</span>
+                </Button>
+              </div>
             </div>
+          </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                refetch();
-                toast.info("Checking for recording updates...");
-              }}
-              disabled={isFetching}
-              className="rounded-xl text-xs h-8 px-3 border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5 self-start sm:self-auto"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-          </CardHeader>
-
-          <CardContent className="p-3.5 sm:p-4">
+          <div className="p-3.5 sm:p-4">
             {meeting.recordingDeletedByHost ? (
               <div className="py-5 px-4 text-center space-y-2 max-w-sm mx-auto">
                 <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border border-amber-200/90 shadow-xs">
@@ -504,22 +546,12 @@ export default function MeetingDetails() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <a
-                          href={getMediaUrl(activeRecording.url)}
-                          download={`${activeRecording.title || "meeting-recording"}.webm`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          Download
-                        </a>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => setActiveRecording(null)}
                           className="h-8 w-8 p-0 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800"
-                          title="Minimize Player"
+                          title="Close Player"
                         >
                           <X className="w-4 h-4" />
                         </Button>
@@ -669,8 +701,8 @@ export default function MeetingDetails() {
                 </Button>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* AI Meeting Transcription Section (Day 15) */}
         <TranscriptCard
@@ -696,7 +728,8 @@ export default function MeetingDetails() {
         <SummaryAndActionItemsCard
           meetingId={meeting._id}
           meetingTitle={meeting.title}
-          hasTranscript={true}
+          hasRecordings={recordingsList.length > 0}
+          hasTranscript={false}
           participants={[meeting.host, ...(meeting.participants || [])]}
         />
 

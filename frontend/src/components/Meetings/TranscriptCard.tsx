@@ -21,7 +21,6 @@ import {
   ListFilter,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   getMeetingTranscript,
   generateMeetingTranscript,
@@ -147,9 +146,9 @@ export function TranscriptCard({
   }, []);
 
   return (
-    <Card className="rounded-2xl border-slate-200 shadow-sm overflow-hidden bg-white">
+    <div className="rounded-2xl border border-slate-200 shadow-sm overflow-hidden bg-white">
       {/* Card Header with AI Badge & Primary Controls */}
-      <CardHeader className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white p-3.5 sm:p-4 border-b border-slate-800">
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white p-3.5 sm:p-4 border-b border-slate-800">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300 shadow-inner">
@@ -157,9 +156,9 @@ export function TranscriptCard({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <CardTitle className="text-sm sm:text-base font-semibold text-white tracking-wide">
+                <h3 className="text-sm sm:text-base font-semibold text-white tracking-wide">
                   AI Meeting Transcript
-                </CardTitle>
+                </h3>
                 <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-indigo-500/25 border border-indigo-400/30 text-indigo-200">
                   <Cpu className="w-2.5 h-2.5" />
                   {providerLabel}
@@ -271,9 +270,9 @@ export function TranscriptCard({
             </span>
           </div>
         )}
-      </CardHeader>
+      </div>
 
-      <CardContent className="p-3.5 sm:p-4">
+      <div className="p-3.5 sm:p-4">
         {isLoading ? (
           <div className="py-8 flex flex-col items-center justify-center text-slate-400 gap-2.5">
             <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
@@ -323,7 +322,7 @@ export function TranscriptCard({
                     ) : (
                       <>
                         <Sparkles className="w-3.5 h-3.5" />
-                        Generate AI Transcript
+                        Generate Transcript
                       </>
                     )}
                   </Button>
@@ -359,22 +358,20 @@ export function TranscriptCard({
               <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
                 <button
                   onClick={() => setViewMode("segments")}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition ${
-                    viewMode === "segments"
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition ${viewMode === "segments"
                       ? "bg-white text-slate-900 shadow-xs"
                       : "text-slate-600 hover:text-slate-900"
-                  }`}
+                    }`}
                 >
                   <ListFilter className="w-3 h-3" />
                   Dialogue Turns ({filteredSegments.length})
                 </button>
                 <button
                   onClick={() => setViewMode("text")}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition ${
-                    viewMode === "text"
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition ${viewMode === "text"
                       ? "bg-white text-slate-900 shadow-xs"
                       : "text-slate-600 hover:text-slate-900"
-                  }`}
+                    }`}
                 >
                   <AlignLeft className="w-3 h-3" />
                   Full Text
@@ -458,7 +455,7 @@ export function TranscriptCard({
             )}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

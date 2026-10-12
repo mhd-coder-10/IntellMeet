@@ -34,12 +34,10 @@ const autoEndMeetingIfEmpty = async (io, meetingId, userId) => {
         const now = new Date();
 
         const updateData = {
-          status: "completed",
+          status: hasMembers ? "completed" : "scheduled",
           endedAt: hasMembers ? now : null,
+          startedAt: hasMembers ? meeting.startedAt : null,
         };
-        if (!hasMembers) {
-          updateData.startedAt = null;
-        }
 
         await meetingRepo.updateById(meetingId, updateData);
         await clearMeetingCaches(meetingId, hostId);
@@ -138,6 +136,7 @@ const registerMeetingHandlers = (io, socket) => {
       const recordingUserId = roomManager.getRecordingUser(meetingId);
       const recordingStartedAt = roomManager.getRecordingStartedAt(meetingId);
       const isRecordingActive = Boolean(recordingStartedAt);
+      const pausedState = roomManager.getRecordingPausedState(meetingId);
 
       socket.emit("meeting:joined", {
         meetingId,
@@ -145,6 +144,8 @@ const registerMeetingHandlers = (io, socket) => {
         recordingUserId,
         isRecording: isRecordingActive,
         recordingStartedAt,
+        isRecordingPaused: pausedState.isPaused,
+        recordingPausedSeconds: pausedState.currentSeconds,
         users: users.map((u) => ({
           userId: u.userId,
           name: u.name,
@@ -164,6 +165,12 @@ const registerMeetingHandlers = (io, socket) => {
           startedAt: recordingStartedAt,
           isSilent: true,
         });
+        if (pausedState.isPaused) {
+          socket.emit("meeting:recording-paused", {
+            userId: recordingUserId,
+            currentSeconds: pausedState.currentSeconds,
+          });
+        }
       }
 
       if (!isHost) {
@@ -299,6 +306,25 @@ const registerMeetingHandlers = (io, socket) => {
     roomManager.clearRecordingUser(meetingId);
     
     socket.to(meetingId).emit("meeting:recording-stopped", {
+      userId: socket.user.id,
+    });
+  });
+
+  // Broadcast recording pause to all participants in room
+  socket.on("meeting:recording-paused", ({ meetingId, currentSeconds }) => {
+    if (!meetingId) return;
+    roomManager.setRecordingPaused(meetingId, true, currentSeconds);
+    socket.to(meetingId).emit("meeting:recording-paused", {
+      userId: socket.user.id,
+      currentSeconds: currentSeconds || 0,
+    });
+  });
+
+  // Broadcast recording resume to all participants in room
+  socket.on("meeting:recording-resumed", ({ meetingId }) => {
+    if (!meetingId) return;
+    roomManager.setRecordingPaused(meetingId, false, 0);
+    socket.to(meetingId).emit("meeting:recording-resumed", {
       userId: socket.user.id,
     });
   });

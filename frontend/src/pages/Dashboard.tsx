@@ -19,6 +19,7 @@ import {
   Info,
   Trash2,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { Header } from "@/components/common/Header";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,22 @@ export default function Dashboard() {
   const [quickCode, setQuickCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["meetings"] }),
+        queryClient.invalidateQueries({ queryKey: ["userProfile"] }),
+      ]);
+      toast.success("Dashboard refreshed!");
+    } catch {
+      toast.error("Failed to refresh dashboard");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Fetch recent meetings
   const { data: meetings, isLoading } = useQuery({
@@ -191,6 +208,17 @@ export default function Dashboard() {
                   Join Room
                 </Button>
               </Link>
+
+              <Button
+                variant="outline"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="w-full sm:w-auto border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-xl px-4 py-2.5 font-medium text-sm flex items-center justify-center gap-2 shadow-xs"
+                title="Refresh dashboard data"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin text-blue-600" : "text-slate-500"}`} />
+                <span>Refresh</span>
+              </Button>
             </div>
           </div>
         </div>

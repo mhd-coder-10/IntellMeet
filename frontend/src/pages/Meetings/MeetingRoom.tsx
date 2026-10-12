@@ -51,6 +51,7 @@ export default function MeetingRoom() {
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [isStopConfirmModalOpen, setIsStopConfirmModalOpen] = useState(false);
   const [remoteRecordingTime, setRemoteRecordingTime] = useState(0);
+  const [remoteIsPaused, setRemoteIsPaused] = useState(false);
   const pendingRecordingRef = useRef<RecordedResult | null>(null);
 
   const { socket, isConnected } = useSocket();
@@ -64,7 +65,6 @@ export default function MeetingRoom() {
     isScreenSharing,
     isRecording,
     recordingUserName,
-    recordingStartTime,
     screenSharingUserId,
     setCurrentMeetingId,
     setIsScreenSharing,
@@ -168,6 +168,8 @@ export default function MeetingRoom() {
       isRecording?: boolean;
       recordingUserId?: string | null;
       recordingStartedAt?: number | null;
+      isRecordingPaused?: boolean;
+      recordingPausedSeconds?: number;
     }) => {
       if (data.screenSharingUserId) {
         setScreenSharingUserId(data.screenSharingUserId);
@@ -179,6 +181,13 @@ export default function MeetingRoom() {
           "Meeting",
           data.recordingStartedAt || Date.now()
         );
+        if (data.isRecordingPaused) {
+          setRemoteIsPaused(true);
+          setRemoteRecordingTime(data.recordingPausedSeconds || 0);
+        } else if (data.recordingStartedAt) {
+          const elapsed = Math.max(0, Math.floor((Date.now() - data.recordingStartedAt) / 1000));
+          setRemoteRecordingTime(elapsed);
+        }
       }
     };
 
@@ -211,18 +220,19 @@ export default function MeetingRoom() {
 
   // Remote recording timer calculation for non-host participants
   useEffect(() => {
-    if (!isRecording || !recordingStartTime) {
+    if (!isRecording) {
       setRemoteRecordingTime(0);
+      setRemoteIsPaused(false);
       return;
     }
-    const updateTime = () => {
-      const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
-      setRemoteRecordingTime(Math.max(0, elapsed));
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
+    if (remoteIsPaused) {
+      return;
+    }
+    const interval = setInterval(() => {
+      setRemoteRecordingTime((prev) => prev + 1);
+    }, 1000);
     return () => clearInterval(interval);
-  }, [isRecording, recordingStartTime]);
+  }, [isRecording, remoteIsPaused]);
 
   // Open preview modal automatically when recording finishes
   useEffect(() => {
@@ -255,10 +265,12 @@ export default function MeetingRoom() {
             pendingRecordingRef.current = null;
             clearRecordedResult();
             if (result && id) {
-              const currentStartedAt = useMeetingStore.getState().recordingStartTime;
-              const finalDuration = currentStartedAt
-                ? Math.max(result.duration, Math.round((Date.now() - currentStartedAt) / 1000))
-                : result.duration;
+              const finalDuration =
+                result.duration > 0
+                  ? result.duration
+                  : recordingTime > 0
+                  ? recordingTime
+                  : 1;
               const currentCount = meeting?.recordings?.length || 0;
               const partNumber = currentCount + 1;
               await uploadMeetingRecording(id, result.blob, {
@@ -325,6 +337,8 @@ export default function MeetingRoom() {
     }) => {
       const recorderName = data.name || "Host";
       setRecordingState(true, data.userId, recorderName, data.startedAt || Date.now());
+      setRemoteRecordingTime(0);
+      setRemoteIsPaused(false);
       if (!data.isSilent) {
         toast.info("🔴 Recording Started by Host");
         playRecordingStartChime();
@@ -333,6 +347,8 @@ export default function MeetingRoom() {
 
     const handleRecordStop = async () => {
       setRecordingState(false);
+      setRemoteIsPaused(false);
+      setRemoteRecordingTime(0);
       toast.info("Recording stopped");
       playRecordingStopChime();
       if (isRecorderActive()) {
@@ -346,6 +362,19 @@ export default function MeetingRoom() {
           console.error("Delegated recorder stop error:", err);
         }
       }
+    };
+
+    const handleRecordPaused = (data?: { currentSeconds?: number }) => {
+      setRemoteIsPaused(true);
+      if (typeof data?.currentSeconds === "number") {
+        setRemoteRecordingTime(data.currentSeconds);
+      }
+      toast.info("⏸️ Recording Paused by Host");
+    };
+
+    const handleRecordResumed = () => {
+      setRemoteIsPaused(false);
+      toast.info("▶️ Recording Resumed by Host");
     };
 
     // Handle force mute by meeting host
@@ -444,6 +473,8 @@ export default function MeetingRoom() {
     socket.on("meeting:screen-share-stopped", handleScreenStop);
     socket.on("meeting:recording-started", handleRecordStart);
     socket.on("meeting:recording-stopped", handleRecordStop);
+    socket.on("meeting:recording-paused", handleRecordPaused);
+    socket.on("meeting:recording-resumed", handleRecordResumed);
     socket.on("meeting:user-joined", handleUserJoined);
     socket.on("meeting:user-left", handleUserLeft);
     socket.on("meeting:force-mute", handleForceMute);
@@ -454,6 +485,8 @@ export default function MeetingRoom() {
       socket.off("meeting:screen-share-stopped", handleScreenStop);
       socket.off("meeting:recording-started", handleRecordStart);
       socket.off("meeting:recording-stopped", handleRecordStop);
+      socket.off("meeting:recording-paused", handleRecordPaused);
+      socket.off("meeting:recording-resumed", handleRecordResumed);
       socket.off("meeting:user-joined", handleUserJoined);
       socket.off("meeting:user-left", handleUserLeft);
       socket.off("meeting:force-mute", handleForceMute);
@@ -496,9 +529,12 @@ export default function MeetingRoom() {
         if (result && id) {
           const currentCount = meeting?.recordings?.length || 0;
           const partNumber = currentCount + 1;
-          const finalDuration = recordingStartTime
-            ? Math.max(result.duration, Math.round((Date.now() - recordingStartTime) / 1000))
-            : result.duration;
+          const finalDuration =
+            result.duration > 0
+              ? result.duration
+              : recordingTime > 0
+              ? recordingTime
+              : 1;
           await uploadMeetingRecording(id, result.blob, {
             title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
             duration: finalDuration,
@@ -559,9 +595,12 @@ export default function MeetingRoom() {
         if (result && id) {
           const currentCount = meeting?.recordings?.length || 0;
           const partNumber = currentCount + 1;
-          const finalDuration = recordingStartTime
-            ? Math.max(result.duration, Math.round((Date.now() - recordingStartTime) / 1000))
-            : result.duration;
+          const finalDuration =
+            result.duration > 0
+              ? result.duration
+              : recordingTime > 0
+              ? recordingTime
+              : 1;
           await uploadMeetingRecording(id, result.blob, {
             title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
             duration: finalDuration,
@@ -673,6 +712,23 @@ export default function MeetingRoom() {
     }
   };
 
+  // Pause composite recording (host only)
+  const handlePauseRecording = () => {
+    pauseRecording();
+    socket?.emit("meeting:recording-paused", {
+      meetingId: id,
+      currentSeconds: recordingTime,
+    });
+    toast.info("Recording paused");
+  };
+
+  // Resume composite recording (host only)
+  const handleResumeRecording = () => {
+    resumeRecording();
+    socket?.emit("meeting:recording-resumed", { meetingId: id });
+    toast.info("Recording resumed");
+  };
+
   // Host moderation: Mute specific participant
   const handleMuteParticipant = (targetUserId: string, targetName: string) => {
     if (!socket || !id || !isHost) return;
@@ -742,9 +798,9 @@ export default function MeetingRoom() {
       }
     : null;
 
-  const activeRecordingSeconds = recordingStartTime
-    ? Math.max(0, Math.floor((Date.now() - recordingStartTime) / 1000))
-    : isRecorderActive()
+  const effectiveIsPaused = isHost ? isPaused : remoteIsPaused;
+
+  const activeRecordingSeconds = isHost
     ? recordingTime
     : remoteRecordingTime;
 
@@ -794,12 +850,32 @@ export default function MeetingRoom() {
           {/* Google Meet Recording Badge with Live Pulse & Time */}
           {isRecording && (
             <div
-              className="flex items-center gap-2 bg-red-500/15 border border-red-500/30 text-red-400 px-3 py-1 rounded-full text-xs font-medium shadow-sm animate-in fade-in"
-              title={`Meeting is being recorded${recordingUserName ? ` by ${recordingUserName}` : ""}`}
+              className={`flex items-center gap-2 border px-3 py-1 rounded-full text-xs font-medium shadow-sm animate-in fade-in ${
+                effectiveIsPaused
+                  ? "bg-amber-500/15 border-amber-500/30 text-amber-400"
+                  : "bg-red-500/15 border-red-500/30 text-red-400"
+              }`}
+              title={
+                effectiveIsPaused
+                  ? "Recording is paused"
+                  : `Meeting is being recorded${recordingUserName ? ` by ${recordingUserName}` : ""}`
+              }
             >
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
-              <span className="font-semibold tracking-wider">REC</span>
-              <span className="font-mono text-white/90 text-[11px] pl-1.5 border-l border-red-500/30">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  effectiveIsPaused
+                    ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)]"
+                    : "bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"
+                }`}
+              />
+              <span className="font-semibold tracking-wider">
+                {effectiveIsPaused ? "REC PAUSED" : "REC"}
+              </span>
+              <span
+                className={`font-mono text-white/90 text-[11px] pl-1.5 border-l ${
+                  effectiveIsPaused ? "border-amber-500/30" : "border-red-500/30"
+                }`}
+              >
                 {formatTime(activeRecordingSeconds)}
               </span>
             </div>
@@ -1016,9 +1092,9 @@ export default function MeetingRoom() {
         onToggleVideo={toggleVideo}
         onToggleScreenShare={handleToggleScreenShare}
         onToggleRecording={handleToggleRecording}
-        onPauseRecording={pauseRecording}
-        onResumeRecording={resumeRecording}
-        isPaused={isPaused}
+        onPauseRecording={handlePauseRecording}
+        onResumeRecording={handleResumeRecording}
+        isPaused={effectiveIsPaused}
         recordingTime={activeRecordingSeconds}
       />
 

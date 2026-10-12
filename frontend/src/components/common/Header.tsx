@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   LogOut,
@@ -14,6 +15,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/store/authStore";
@@ -23,9 +25,23 @@ export function Header() {
   const { user, clearAuth } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
 
   // Mobile menu open state
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleGlobalRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await queryClient.invalidateQueries();
+      toast.success("Page data refreshed!");
+    } catch {
+      toast.error("Failed to refresh data");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -104,6 +120,19 @@ export function Header() {
         <div className="flex items-center gap-3">
           {user && (
             <>
+              {/* Desktop Global Refresh Button */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleGlobalRefresh}
+                disabled={isRefreshing}
+                className="hidden sm:inline-flex text-slate-500 hover:text-blue-600 hover:bg-blue-50 text-xs px-2.5 py-1.5 rounded-xl transition gap-1.5 border border-transparent hover:border-blue-200"
+                title="Refresh page data"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin text-blue-600" : ""}`} />
+                <span className="hidden xl:inline text-xs font-medium">Refresh</span>
+              </Button>
+
               {/* Desktop Profile Pill */}
               <Link
                 to="/profile"
@@ -234,8 +263,21 @@ export function Header() {
             })}
           </div>
 
-          {/* Mobile Logout Button */}
-          <div className="pt-2 border-t border-slate-200">
+          {/* Mobile Refresh & Logout Buttons */}
+          <div className="pt-2 border-t border-slate-200 space-y-1">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                handleGlobalRefresh();
+              }}
+              disabled={isRefreshing}
+              className="w-full justify-start text-slate-700 hover:text-blue-600 hover:bg-blue-50 text-sm font-medium rounded-xl py-2.5 px-3.5"
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? "animate-spin text-blue-600" : "text-slate-500"}`} />
+              Refresh Page Data
+            </Button>
+
             <Button
               variant="ghost"
               onClick={() => {

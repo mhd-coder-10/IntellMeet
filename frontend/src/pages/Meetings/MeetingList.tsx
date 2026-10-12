@@ -9,7 +9,9 @@ import {
   Loader2,
   Video,
   Search,
+  RefreshCw,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Header } from "@/components/common/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +27,19 @@ export default function MeetingList() {
   const [statusFilter, setStatusFilter] = useState<
     "all" | "ongoing" | "scheduled" | "completed"
   >("all");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      toast.success("Meetings list refreshed!");
+    } catch {
+      toast.error("Failed to refresh meetings");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const { data: meetings, isLoading } = useQuery({
     queryKey: ["meetings"],
@@ -95,6 +110,17 @@ export default function MeetingList() {
           </div>
 
           <div className="flex flex-wrap sm:flex-nowrap items-center gap-3">
+            <Button
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="w-full sm:w-auto border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs rounded-xl h-10 px-4"
+              title="Refresh meetings"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isRefreshing ? "animate-spin text-blue-600" : "text-slate-500"}`} />
+              Refresh
+            </Button>
+
             <Link to="/meetings/join" className="w-full sm:w-auto">
               <Button
                 variant="outline"
