@@ -88,12 +88,54 @@ const getTasksByProject = async (projectId) => {
   return tasks;
 };
 
+// Helper to collect member IDs involved in a project (owner, assignees, creators)
+const getProjectMemberUserIds = async (projectId, project = null) => {
+  const userIds = new Set();
+  const proj = project || (await Project.findById(projectId));
+  if (proj?.owner) {
+    userIds.add(proj.owner.toString());
+  }
+
+  // Active assignees and creators on tasks belonging to this project
+  const [assignees, creators] = await Promise.all([
+    Task.distinct("assignee", { project: projectId, assignee: { $ne: null } }),
+    Task.distinct("creator", { project: projectId, creator: { $ne: null } }),
+  ]);
+
+  assignees.forEach((id) => id && userIds.add(id.toString()));
+  creators.forEach((id) => id && userIds.add(id.toString()));
+
+  return userIds;
+};
+
 // Move a task between Kanban columns and update order
 const moveTask = async (taskId, userId, { columnId, newOrder }) => {
   const task = await Task.findById(taskId);
   if (!task) {
     const error = new Error("Task not found");
     error.statusCode = 404;
+    throw error;
+  }
+
+  const team = await Team.findById(task.team);
+  const isTeamOwner = team && team.owner && team.owner.toString() === userId.toString();
+  const isTeamAdmin =
+    team &&
+    team.members &&
+    team.members.some(
+      (m) =>
+        m.user &&
+        m.user.toString() === userId.toString() &&
+        (m.role === "admin" || m.role === "owner")
+    );
+  const isTaskCreator = task.creator && task.creator.toString() === userId.toString();
+  const isTaskAssignee = task.assignee && task.assignee.toString() === userId.toString();
+
+  if (!isTeamOwner && !isTeamAdmin && !isTaskCreator && !isTaskAssignee) {
+    const error = new Error(
+      "Permission Denied: Only the assigned member, task creator, or team admin/owner can change task status"
+    );
+    error.statusCode = 403;
     throw error;
   }
 
@@ -109,7 +151,33 @@ const moveTask = async (taskId, userId, { columnId, newOrder }) => {
 
   await task.save();
 
-  // Send status update notification if column changed
+  // 2-Way Sync to linked ActionItem if generated from one
+  if (task.actionItemId) {
+    try {
+      const ActionItem = require("../models/ActionItem");
+      const linkedItem = await ActionItem.findById(task.actionItemId);
+      if (linkedItem) {
+        if (targetStatus === "done" || targetColumn === "col-done") {
+          linkedItem.status = "completed";
+          linkedItem.completedAt = linkedItem.completedAt || new Date();
+          linkedItem.completedBy = userId;
+        } else if (targetStatus === "in_progress" || targetColumn === "col-in-progress") {
+          linkedItem.status = "in_progress";
+          linkedItem.completedAt = null;
+          linkedItem.completedBy = null;
+        } else {
+          linkedItem.status = "pending";
+          linkedItem.completedAt = null;
+          linkedItem.completedBy = null;
+        }
+        await linkedItem.save();
+      }
+    } catch (syncErr) {
+      console.warn("Failed to sync task move to action item:", syncErr.message);
+    }
+  }
+
+  // Send status update notification if column changed (scoped strictly to project participants)
   if (oldColumn && targetColumn && oldColumn !== targetColumn) {
     const colLabels = {
       "col-todo": "To Do",
@@ -124,26 +192,11 @@ const moveTask = async (taskId, userId, { columnId, newOrder }) => {
       const moverName = mover?.name || "A team member";
       const toColLabel = colLabels[targetColumn] || targetColumn;
 
-      const notifyRecipients = new Set();
-
-      // Notify all team members who are part of this project/workspace
-      const team = await Team.findById(task.team);
-      if (team && Array.isArray(team.members)) {
-        for (const m of team.members) {
-          const mUserId = m.user ? m.user.toString() : null;
-          if (mUserId && mUserId !== userId.toString()) {
-            notifyRecipients.add(mUserId);
-          }
-        }
-      }
-
-      // Also ensure assignee and creator get it if not already in team list
-      if (task.assignee && task.assignee.toString() !== userId.toString()) {
-        notifyRecipients.add(task.assignee.toString());
-      }
-      if (task.creator && task.creator.toString() !== userId.toString()) {
-        notifyRecipients.add(task.creator.toString());
-      }
+      // Notify strictly project members (not entire workspace)
+      const notifyRecipients = await getProjectMemberUserIds(task.project, project);
+      if (task.assignee) notifyRecipients.add(task.assignee.toString());
+      if (task.creator) notifyRecipients.add(task.creator.toString());
+      notifyRecipients.delete(userId.toString());
 
       for (const recipientId of notifyRecipients) {
         await notificationService.createNotification({
@@ -175,26 +228,78 @@ const updateTask = async (taskId, userId, data) => {
     throw error;
   }
 
-  // Permission check for editing core details (title, description, assignee, priority, dueDate)
-  const isEditingCoreDetails =
-    data.title !== undefined ||
-    data.description !== undefined ||
-    data.assignee !== undefined ||
-    data.priority !== undefined ||
-    data.dueDate !== undefined;
+  // Detect if any core details actually changed (excluding status/column movement)
+  const titleChanged = data.title !== undefined && data.title.trim() !== (task.title || "").trim();
+  const descChanged =
+    data.description !== undefined && data.description.trim() !== (task.description || "").trim();
+  const priorityChanged = data.priority !== undefined && data.priority !== task.priority;
+  const assigneeChanged =
+    data.assignee !== undefined && String(data.assignee || "") !== String(task.assignee || "");
+  const dueDateChanged =
+    data.dueDate !== undefined &&
+    (Boolean(data.dueDate) !== Boolean(task.dueDate) ||
+      (data.dueDate &&
+        task.dueDate &&
+        new Date(data.dueDate).getTime() !== new Date(task.dueDate).getTime()));
+  const tagsChanged =
+    data.tags !== undefined &&
+    Array.isArray(data.tags) &&
+    JSON.stringify(data.tags) !== JSON.stringify(task.tags || []);
 
-  if (isEditingCoreDetails) {
+  const hasCoreDetailsChanged =
+    titleChanged ||
+    descChanged ||
+    priorityChanged ||
+    assigneeChanged ||
+    dueDateChanged ||
+    tagsChanged;
+
+  if (hasCoreDetailsChanged) {
     const team = await Team.findById(task.team);
     const isTeamOwner = team && team.owner && team.owner.toString() === userId.toString();
-    const isTeamAdmin = team && team.members && team.members.some(
-      (m) => m.user && m.user.toString() === userId.toString() && (m.role === "admin" || m.role === "owner")
-    );
+    const isTeamAdmin =
+      team &&
+      team.members &&
+      team.members.some(
+        (m) =>
+          m.user &&
+          m.user.toString() === userId.toString() &&
+          (m.role === "admin" || m.role === "owner")
+      );
+    const isTaskCreator = task.creator && task.creator.toString() === userId.toString();
+
+    if (!isTeamOwner && !isTeamAdmin && !isTaskCreator) {
+      const error = new Error(
+        "Permission Denied: Only the task creator or team admin/owner can modify core task details"
+      );
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+
+  // Check permissions for status or column changes
+  const statusChanged =
+    (data.status !== undefined && data.status !== task.status) ||
+    (data.columnId !== undefined && data.columnId !== task.columnId);
+
+  if (statusChanged) {
+    const team = await Team.findById(task.team);
+    const isTeamOwner = team && team.owner && team.owner.toString() === userId.toString();
+    const isTeamAdmin =
+      team &&
+      team.members &&
+      team.members.some(
+        (m) =>
+          m.user &&
+          m.user.toString() === userId.toString() &&
+          (m.role === "admin" || m.role === "owner")
+      );
     const isTaskCreator = task.creator && task.creator.toString() === userId.toString();
     const isTaskAssignee = task.assignee && task.assignee.toString() === userId.toString();
 
     if (!isTeamOwner && !isTeamAdmin && !isTaskCreator && !isTaskAssignee) {
       const error = new Error(
-        "Permission Denied: Only the task creator, assignee, or team admin/owner can modify task details"
+        "Permission Denied: Only the assigned member, task creator, or team admin/owner can change task status"
       );
       error.statusCode = 403;
       throw error;
@@ -215,7 +320,60 @@ const updateTask = async (taskId, userId, data) => {
   if (data.dueDate !== undefined) task.dueDate = data.dueDate ? new Date(data.dueDate) : null;
   if (data.tags && Array.isArray(data.tags)) task.tags = data.tags;
 
+  // Only increment updateCount if core details actually changed (NOT on column move/status change)
+  if (hasCoreDetailsChanged) {
+    task.updateCount = (task.updateCount || 0) + 1;
+  }
+
   await task.save();
+
+  // 2-Way Sync to linked ActionItem if generated from one
+  if (task.actionItemId) {
+    try {
+      const ActionItem = require("../models/ActionItem");
+      const linkedItem = await ActionItem.findById(task.actionItemId);
+      if (linkedItem) {
+        if (data.title) linkedItem.task = data.title.trim();
+        if (data.priority) linkedItem.priority = data.priority;
+        if (data.dueDate !== undefined) {
+          linkedItem.dueDate = data.dueDate ? new Date(data.dueDate) : null;
+        }
+        if (data.assignee !== undefined) {
+          linkedItem.assignee = data.assignee || null;
+          if (data.assignee) {
+            const User = require("../models/User");
+            const assigneeUser = await User.findById(data.assignee).select("name");
+            linkedItem.assigneeName = assigneeUser?.name || "Assigned";
+          } else {
+            linkedItem.assigneeName = "Unassigned";
+          }
+        }
+        if (data.columnId || data.status) {
+          const curStatus = task.status;
+          if (curStatus === "done") {
+            linkedItem.status = "completed";
+            linkedItem.completedAt = linkedItem.completedAt || new Date();
+            linkedItem.completedBy = userId;
+          } else if (curStatus === "in_progress") {
+            linkedItem.status = "in_progress";
+            linkedItem.completedAt = null;
+            linkedItem.completedBy = null;
+          } else {
+            linkedItem.status = "pending";
+            linkedItem.completedAt = null;
+            linkedItem.completedBy = null;
+          }
+        }
+        // Only increment action item updateCount if core details changed
+        if (hasCoreDetailsChanged) {
+          linkedItem.updateCount = (linkedItem.updateCount || 0) + 1;
+        }
+        await linkedItem.save();
+      }
+    } catch (syncErr) {
+      console.warn("Failed to sync task update to action item:", syncErr.message);
+    }
+  }
 
   // If assignee changed, notify new assignee
   if (task.assignee && task.assignee.toString() !== oldAssignee && task.assignee.toString() !== userId.toString()) {
@@ -233,6 +391,34 @@ const updateTask = async (taskId, userId, data) => {
     }
   }
 
+  // Send update notification scoped strictly to project members (only if core details changed)
+  if (hasCoreDetailsChanged) {
+    try {
+      const project = await Project.findById(task.project);
+      const User = require("../models/User");
+      const updater = await User.findById(userId);
+      const updaterName = updater?.name || "A team member";
+
+      const notifyRecipients = await getProjectMemberUserIds(task.project, project);
+      if (task.assignee) notifyRecipients.add(task.assignee.toString());
+      if (task.creator) notifyRecipients.add(task.creator.toString());
+      notifyRecipients.delete(userId.toString());
+
+      for (const recipientId of notifyRecipients) {
+        await notificationService.createNotification({
+          recipient: recipientId,
+          sender: userId,
+          type: "task_updated",
+          title: "Task Updated",
+          message: `${updaterName} updated task "${task.title}" on board "${project?.name || "Board"}"`,
+          link: project ? `/teams/${project.team}/projects/${project._id}` : "",
+        });
+      }
+    } catch (nErr) {
+      console.warn("Task update notification error:", nErr.message);
+    }
+  }
+
   return await Task.findById(task._id)
     .populate("assignee", "name username email profilePicture")
     .populate("creator", "name username email profilePicture")
@@ -240,7 +426,7 @@ const updateTask = async (taskId, userId, data) => {
 };
 
 // Delete a task (restricted to creator, team owner, or team admin)
-const deleteTask = async (taskId, userId) => {
+const deleteTask = async (taskId, userId, io = null) => {
   const task = await Task.findById(taskId);
   if (!task) {
     const error = new Error("Task not found");
@@ -264,8 +450,37 @@ const deleteTask = async (taskId, userId) => {
   }
 
   const projectId = task.project;
+  const actionItemId = task.actionItemId;
+
   await Task.findByIdAndDelete(taskId);
-  return { message: "Task deleted successfully", taskId, project: projectId };
+
+  // If this task was generated from an action item, reset its conversion state and mark as deleted from workspace
+  if (actionItemId) {
+    try {
+      const ActionItem = require("../models/ActionItem");
+      const updatedActionItem = await ActionItem.findByIdAndUpdate(
+        actionItemId,
+        {
+          isConverted: false,
+          convertedTask: null,
+          convertedProject: null,
+          convertedTeam: null,
+          convertedAt: null,
+          isWorkspaceTaskDeleted: true,
+        },
+        { new: true }
+      ).populate("assignee", "name username avatar profilePicture");
+
+      if (updatedActionItem && io) {
+        io.to(updatedActionItem.meeting.toString()).emit("action_item:updated", updatedActionItem);
+        io.emit("action_item:updated", updatedActionItem);
+      }
+    } catch (aErr) {
+      console.warn("Failed to reset action item conversion state:", aErr.message);
+    }
+  }
+
+  return { message: "Task deleted successfully", taskId, project: projectId, actionItemId };
 };
 
 // Add comment to task
@@ -324,6 +539,54 @@ const addComment = async (taskId, userId, text) => {
     .populate("comments.user", "name username email profilePicture");
 };
 
+// Scan tasks due today and dispatch reminder notifications
+const checkDueTasksAndNotify = async (io = null) => {
+  try {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const dueTasks = await Task.find({
+      dueDate: { $ne: null, $lte: todayEnd },
+      status: { $ne: "done" },
+      columnId: { $ne: "col-done" },
+      assignee: { $ne: null },
+      $or: [
+        { lastDueReminderSentAt: null },
+        { lastDueReminderSentAt: { $lt: todayStart } },
+      ],
+    })
+      .populate("project", "name team")
+      .populate("assignee", "name email");
+
+    for (const task of dueTasks) {
+      if (!task.assignee) continue;
+
+      const recipientId = task.assignee._id || task.assignee;
+      const boardName = task.project?.name || "Board";
+      const teamId = task.project?.team || task.team;
+      const projId = task.project?._id || task.project;
+
+      const { notification } = await notificationService.createNotification({
+        recipient: recipientId,
+        sender: null,
+        type: "task_due",
+        title: "Task Due Today",
+        message: `Reminder: Task "${task.title}" is due today on board "${boardName}"`,
+        link: `/teams/${teamId}/projects/${projId}`,
+      });
+
+      task.lastDueReminderSentAt = new Date();
+      await task.save();
+    }
+
+    return dueTasks.length;
+  } catch (err) {
+    console.warn("[DueTasks] Check due tasks error:", err.message);
+    return 0;
+  }
+};
+
 module.exports = {
   createTask,
   getTasksByProject,
@@ -331,4 +594,5 @@ module.exports = {
   updateTask,
   deleteTask,
   addComment,
+  checkDueTasksAndNotify,
 };

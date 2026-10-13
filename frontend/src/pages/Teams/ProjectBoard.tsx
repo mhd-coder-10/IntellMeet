@@ -16,6 +16,7 @@ import {
   Flame,
   RefreshCw,
   Trash2,
+  Pencil,
   MessageSquare,
   Send,
   Calendar,
@@ -24,6 +25,7 @@ import {
   X,
   Loader2,
   Building2,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -239,6 +241,7 @@ export default function ProjectBoard() {
       if (selectedTask && selectedTask._id === updatedTask._id) {
         setSelectedTask(updatedTask);
       }
+      queryClient.invalidateQueries({ queryKey: ["tasks", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
     };
 
@@ -288,6 +291,24 @@ export default function ProjectBoard() {
     }
   }, [selectedTask]);
 
+  // Keep selectedTask in sync with tasks list changes (from sockets, 2-way sync, or mutations)
+  useEffect(() => {
+    if (selectedTask) {
+      const fresh = tasks.find((t) => t._id === selectedTask._id);
+      if (
+        fresh &&
+        (fresh.updateCount !== selectedTask.updateCount ||
+          fresh.title !== selectedTask.title ||
+          fresh.description !== selectedTask.description ||
+          fresh.priority !== selectedTask.priority ||
+          fresh.columnId !== selectedTask.columnId ||
+          fresh.dueDate !== selectedTask.dueDate)
+      ) {
+        setSelectedTask(fresh);
+      }
+    }
+  }, [tasks]);
+
   // Create Task Mutation
   const createTaskMutation = useMutation({
     mutationFn: (data: any) => createTask(projectId!, data),
@@ -326,6 +347,7 @@ export default function ProjectBoard() {
           order: updated.order,
         });
       }
+      queryClient.invalidateQueries({ queryKey: ["tasks", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
     },
     onError: (err: any) => {
@@ -343,6 +365,7 @@ export default function ProjectBoard() {
         old ? old.map((t) => (t._id === updated._id ? updated : t)) : [updated]
       );
       setSelectedTask(updated);
+      queryClient.invalidateQueries({ queryKey: ["tasks", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
       toast.success("Task updated!");
     },
@@ -412,6 +435,12 @@ export default function ProjectBoard() {
 
   // Drag and Drop Handlers
   const handleDragStart = (e: React.DragEvent, taskId: string) => {
+    const task = tasks.find((t) => t._id === taskId);
+    if (!task || !canMoveTask(task)) {
+      e.preventDefault();
+      toast.error("Only the assigned member, task creator, or workspace admin can move this task");
+      return;
+    }
     e.dataTransfer.setData("text/plain", taskId);
     e.dataTransfer.effectAllowed = "move";
     setDraggedTaskId(taskId);
@@ -441,6 +470,11 @@ export default function ProjectBoard() {
     const task = tasks.find((t) => t._id === taskId);
     if (!task || task.columnId === targetColId) return;
 
+    if (!canMoveTask(task)) {
+      toast.error("Permission Denied: Only the assigned member, task creator, or workspace admin can move this task");
+      return;
+    }
+
     // Optimistically move
     queryClient.setQueryData<KanbanTask[]>(["tasks", projectId], (old) =>
       old ? old.map((t) => (t._id === taskId ? { ...t, columnId: targetColId } : t)) : []
@@ -452,6 +486,10 @@ export default function ProjectBoard() {
   // Quick Move helper (for touch devices and dropdown actions)
   const handleQuickMove = (task: KanbanTask, targetColId: string) => {
     if (task.columnId === targetColId) return;
+    if (!canMoveTask(task)) {
+      toast.error("Permission Denied: Only the assigned member, task creator, or workspace admin can change task status");
+      return;
+    }
     moveTaskMutation.mutate({ taskId: task._id, columnId: targetColId });
   };
 
@@ -522,37 +560,67 @@ export default function ProjectBoard() {
   // Permission calculations
   const isTeamOwner = useMemo(() => {
     if (!team || !currentUser) return false;
+    const currentUserId = currentUser._id || currentUser.id;
     const ownerId = typeof team.owner === "string" ? team.owner : team.owner?._id;
-    return ownerId === currentUser._id;
+    return ownerId === currentUserId;
   }, [team, currentUser]);
 
   const isTeamAdmin = useMemo(() => {
     if (!team?.members || !currentUser) return false;
+    const currentUserId = currentUser._id || currentUser.id;
     return team.members.some((m) => {
       const uId = typeof m.user === "string" ? m.user : m.user?._id;
-      return uId === currentUser._id && (m.role === "admin" || m.role === "owner");
+      return uId === currentUserId && (m.role === "admin" || m.role === "owner");
     });
   }, [team, currentUser]);
 
-  const canDeleteSelectedTask = useMemo(() => {
-    if (!selectedTask || !currentUser) return false;
+  // Check if current user is Task Creator or Workspace Owner/Admin
+  const canModifyTask = (task: KanbanTask) => {
+    if (!currentUser || !task) return false;
     if (isTeamOwner || isTeamAdmin) return true;
+    const currentUserId = currentUser._id || currentUser.id;
     const creatorId =
-      typeof selectedTask.creator === "string"
-        ? selectedTask.creator
-        : (selectedTask.creator as any)?._id;
-    return creatorId === currentUser._id;
+      typeof task.creator === "string"
+        ? task.creator
+        : (task.creator as any)?._id || (task.creator as any)?.id;
+    return Boolean(creatorId && String(creatorId) === String(currentUserId));
+  };
+
+  // Check if current user is Task Assignee, Task Creator, or Workspace Owner/Admin
+  const canMoveTask = (task: KanbanTask) => {
+    if (!currentUser || !task) return false;
+    if (isTeamOwner || isTeamAdmin) return true;
+    const currentUserId = currentUser._id || currentUser.id;
+    const creatorId =
+      typeof task.creator === "string"
+        ? task.creator
+        : (task.creator as any)?._id || (task.creator as any)?.id;
+    if (creatorId && String(creatorId) === String(currentUserId)) return true;
+
+    const assigneeId =
+      typeof task.assignee === "string"
+        ? task.assignee
+        : (task.assignee as any)?._id || (task.assignee as any)?.id;
+    if (assigneeId && String(assigneeId) === String(currentUserId)) return true;
+
+    return false;
+  };
+
+  const canDeleteSelectedTask = useMemo(() => {
+    if (!selectedTask) return false;
+    return canModifyTask(selectedTask);
   }, [selectedTask, currentUser, isTeamOwner, isTeamAdmin]);
 
   const canEditSelectedTask = useMemo(() => {
-    if (!selectedTask || !currentUser) return false;
-    if (canDeleteSelectedTask) return true;
-    const assigneeId =
-      typeof selectedTask.assignee === "string"
-        ? selectedTask.assignee
-        : selectedTask.assignee?._id;
-    return assigneeId === currentUser._id;
-  }, [selectedTask, currentUser, canDeleteSelectedTask]);
+    if (!selectedTask) return false;
+    // Core details can ONLY be edited by the creator or workspace admin/owner (not assignee)
+    return canModifyTask(selectedTask);
+  }, [selectedTask, currentUser, isTeamOwner, isTeamAdmin]);
+
+  const canMoveSelectedTask = useMemo(() => {
+    if (!selectedTask) return false;
+    return canMoveTask(selectedTask);
+  }, [selectedTask, currentUser, isTeamOwner, isTeamAdmin]);
 
   if (isProjectLoading) {
     return (
@@ -889,47 +957,74 @@ export default function ProjectBoard() {
                           new Date(task.dueDate) < new Date() &&
                           task.columnId !== "col-done";
 
+                        const allowedToMove = canMoveTask(task);
+
                         return (
                           <div
                             key={task._id}
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, task._id)}
+                            draggable={allowedToMove}
+                            onDragStart={(e) => allowedToMove && handleDragStart(e, task._id)}
                             onClick={() => setSelectedTask(task)}
-                            className={`group relative rounded-xl border bg-white p-3.5 shadow-xs hover:shadow-md transition-all duration-150 cursor-pointer space-y-2.5 ${
+                            className={`group relative rounded-xl border bg-white p-3.5 shadow-xs hover:shadow-md transition-all duration-150 space-y-2.5 ${
                               isDragging
                                 ? "opacity-40 border-blue-400 scale-[0.98]"
                                 : "border-slate-200/90 hover:border-blue-300"
+                            } ${
+                              allowedToMove ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
                             }`}
                           >
                             {/* Card Top Pill Row */}
                             <div className="flex items-center justify-between gap-2">
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${pStyle.badge}`}
-                              >
-                                <PriorityIcon className="w-3 h-3" />
-                                <span>{pStyle.label}</span>
-                              </span>
-
-                              {/* Quick Move Action Button (For Mobile/Touch & Fast Moving) */}
-                              <div
-                                className="relative flex items-center"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <select
-                                  value={task.columnId}
-                                  onChange={(e) =>
-                                    handleQuickMove(task, e.target.value)
-                                  }
-                                  aria-label="Move task to column"
-                                  className="text-[10px] bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-lg px-1.5 py-0.5 font-medium focus:outline-none cursor-pointer"
-                                  title="Quick move to another column"
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${pStyle.badge}`}
                                 >
-                                  <option value="col-todo">To Do</option>
-                                  <option value="col-in-progress">In Progress</option>
-                                  <option value="col-review">Review</option>
-                                  <option value="col-done">Done</option>
-                                </select>
+                                  <PriorityIcon className="w-3 h-3" />
+                                  <span>{pStyle.label}</span>
+                                </span>
+
+                                {task.updateCount && task.updateCount > 0 ? (
+                                  <span
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                    title={`Synchronized revision (${task.updateCount} updates)`}
+                                  >
+                                    <RefreshCw className="w-2.5 h-2.5 text-emerald-600" />
+                                    <span>{task.updateCount === 1 ? "Updated" : `Updated ${task.updateCount}x`}</span>
+                                  </span>
+                                ) : null}
                               </div>
+
+                              {/* Quick Move Action Button or Lock Indicator */}
+                              {allowedToMove ? (
+                                <div
+                                  className="relative flex items-center"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <select
+                                    value={task.columnId}
+                                    onChange={(e) =>
+                                      handleQuickMove(task, e.target.value)
+                                    }
+                                    aria-label="Move task to column"
+                                    className="text-[10px] bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-lg px-1.5 py-0.5 font-medium focus:outline-none cursor-pointer"
+                                    title="Quick move to another column"
+                                  >
+                                    <option value="col-todo">To Do</option>
+                                    <option value="col-in-progress">In Progress</option>
+                                    <option value="col-review">Review</option>
+                                    <option value="col-done">Done</option>
+                                  </select>
+                                </div>
+                              ) : (
+                                <div
+                                  className="flex items-center gap-1 text-[10px] font-semibold text-slate-400 bg-slate-100/70 px-2 py-0.5 rounded-md border border-slate-200/60"
+                                  title="Only the assigned member, creator, or workspace admin can change task status"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <Lock className="w-2.5 h-2.5 text-slate-400" />
+                                  <span>Locked</span>
+                                </div>
+                              )}
                             </div>
 
                             {/* Card Title */}
@@ -978,6 +1073,31 @@ export default function ProjectBoard() {
                                   <span className="text-[10px] text-slate-400 italic">
                                     Unassigned
                                   </span>
+                                )}
+
+                                {/* Edit & Delete Action Icons (Visible only to Task Creator & Workspace Owner/Admin) */}
+                                {canModifyTask(task) && (
+                                  <div
+                                    className="flex items-center gap-0.5 pl-1.5 border-l border-slate-200"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedTask(task)}
+                                      className="text-slate-400 hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 transition cursor-pointer"
+                                      title="Edit / Update Task Details"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeleteTaskId(task._id)}
+                                      className="text-slate-400 hover:text-red-600 p-1 rounded-md hover:bg-red-50 transition cursor-pointer"
+                                      title="Delete Task Card"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
                                 )}
                               </div>
 
@@ -1053,8 +1173,19 @@ export default function ProjectBoard() {
                           onClick={() => setSelectedTask(task)}
                           className="hover:bg-slate-50/60 transition cursor-pointer"
                         >
-                          <td className="py-3.5 px-4 font-bold text-slate-900 max-w-xs truncate">
-                            {task.title}
+                          <td className="py-3.5 px-4 font-bold text-slate-900 max-w-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate">{task.title}</span>
+                              {task.updateCount && task.updateCount > 0 ? (
+                                <span
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0"
+                                  title={`Task synchronized & revised (${task.updateCount} updates)`}
+                                >
+                                  <RefreshCw className="w-2.5 h-2.5 text-emerald-600" />
+                                  <span>{task.updateCount === 1 ? "Updated" : `Updated ${task.updateCount}x`}</span>
+                                </span>
+                              ) : null}
+                            </div>
                           </td>
                           <td className="py-3.5 px-4">
                             <span
@@ -1095,14 +1226,36 @@ export default function ProjectBoard() {
                             className="py-3.5 px-4 text-right"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setSelectedTask(task)}
-                              className="text-blue-600 hover:bg-blue-50 text-xs h-8 px-2"
-                            >
-                              Details
-                            </Button>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setSelectedTask(task)}
+                                className="text-blue-600 hover:bg-blue-50 text-xs h-8 px-2"
+                              >
+                                Details
+                              </Button>
+                              {canModifyTask(task) && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedTask(task)}
+                                    className="text-slate-400 hover:text-blue-600 p-1.5 rounded-md hover:bg-blue-50 transition cursor-pointer"
+                                    title="Edit / Update Task Details"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteTaskId(task._id)}
+                                    className="text-slate-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition cursor-pointer"
+                                    title="Delete Task Card"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1298,7 +1451,7 @@ export default function ProjectBoard() {
             {/* Header */}
             <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
               <div className="space-y-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span
                     className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
                       priorityStyles[selectedTask.priority]?.badge
@@ -1306,6 +1459,15 @@ export default function ProjectBoard() {
                   >
                     {priorityStyles[selectedTask.priority]?.label}
                   </span>
+                  {selectedTask.updateCount && selectedTask.updateCount > 0 ? (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      title={`Task synchronized & revised (${selectedTask.updateCount} updates)`}
+                    >
+                      <RefreshCw className="w-2.5 h-2.5 text-emerald-600" />
+                      <span>{selectedTask.updateCount === 1 ? "Updated" : `Updated ${selectedTask.updateCount}x`}</span>
+                    </span>
+                  ) : null}
                   <span className="text-xs text-slate-400">
                     Created {new Date(selectedTask.createdAt).toLocaleDateString()}
                   </span>
@@ -1334,21 +1496,29 @@ export default function ProjectBoard() {
               </div>
             </div>
 
-            {/* Read-Only Notice for Non-Assignees / Non-Creators */}
+            {/* Read-Only Notice for Non-Creators */}
             {!canEditSelectedTask && (
               <div className="p-3 rounded-2xl bg-amber-50/80 border border-amber-200/80 text-amber-800 text-xs flex items-center gap-2.5">
                 <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
                 <span>
-                  <strong>Read-only mode:</strong> Only the task creator, assigned member, or team admin can edit details. You can still change column status or join the discussion below.
+                  <strong>Read-only details:</strong> Only the task creator or team admin/owner can edit core task details. {canMoveSelectedTask ? "As the assigned member, you can update workflow column status or participate in comments." : "Status change is also restricted to the assigned member and admin."}
                 </span>
               </div>
             )}
 
             {/* Column Switcher Pills */}
             <div className="space-y-1.5">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                Workflow Column
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Workflow Column
+                </span>
+                {!canMoveSelectedTask && (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 font-medium">
+                    <Lock className="w-3 h-3 text-amber-500" />
+                    Status change restricted
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {COLUMNS_CONFIG.map((col) => {
                   const isActive = editColumnId === col.id;
@@ -1356,6 +1526,7 @@ export default function ProjectBoard() {
                     <button
                       key={col.id}
                       type="button"
+                      disabled={!canMoveSelectedTask}
                       onClick={() => {
                         setEditColumnId(col.id);
                         handleQuickMove(selectedTask, col.id);
@@ -1364,7 +1535,7 @@ export default function ProjectBoard() {
                         isActive
                           ? `${col.badge} shadow-xs ring-1 ring-blue-500/20`
                           : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                      }`}
+                      } ${!canMoveSelectedTask ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
                     >
                       {col.title}
                     </button>

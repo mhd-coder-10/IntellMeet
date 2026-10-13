@@ -32,6 +32,7 @@ const notificationSchema = new mongoose.Schema(
                 "task_updated",
                 "task_deleted",
                 "task_comment",
+                "task_due",
                 "team_updated",
                 "project_updated",
             ],

@@ -92,9 +92,9 @@ const updateTask = async (req, res) => {
 
 const deleteTask = async (req, res) => {
   try {
-    const result = await taskService.deleteTask(req.params.id, req.user.id);
-
     const io = req.app.get("io");
+    const result = await taskService.deleteTask(req.params.id, req.user.id, io);
+
     if (io) {
       if (result.project) {
         io.to(`project:${result.project}`).emit("task:deleted", { taskId: req.params.id });

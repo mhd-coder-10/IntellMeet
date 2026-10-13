@@ -191,11 +191,17 @@ const getSummary = async (req, res) => {
   }
 };
 
-// Delete meeting summary
+// Delete meeting summary (Host only, if not trusted)
 const deleteSummary = async (req, res) => {
   try {
     const { id: meetingId } = req.params;
-    await summaryService.deleteSummary(meetingId);
+    await summaryService.deleteSummary(meetingId, req.user?.id);
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(meetingId).emit("summary:deleted", { meetingId });
+      io.emit("summary:deleted", { meetingId });
+    }
 
     res.status(200).json({
       success: true,
@@ -206,6 +212,32 @@ const deleteSummary = async (req, res) => {
     res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to delete summary",
+    });
+  }
+};
+
+// Mark meeting summary as trusted and finalized (Host only)
+const trustSummary = async (req, res) => {
+  try {
+    const { id: meetingId } = req.params;
+    const summary = await summaryService.trustSummary(meetingId, req.user?.id);
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(meetingId).emit("summary:trusted", { meetingId, summary });
+      io.emit("summary:trusted", { meetingId, summary });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Summary marked as trusted and finalized successfully",
+      data: { summary },
+    });
+  } catch (error) {
+    console.error("Trust summary error:", error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to mark summary as trusted",
     });
   }
 };
@@ -237,7 +269,8 @@ const exportSummary = async (req, res) => {
 const toggleActionItem = async (req, res) => {
   try {
     const { id: actionItemId } = req.params;
-    const item = await actionItemService.toggleActionItem(actionItemId, req.user?.id);
+    const io = req.app.get("io");
+    const item = await actionItemService.toggleActionItem(actionItemId, req.user?.id, io);
 
     res.status(200).json({
       success: true,
@@ -309,7 +342,8 @@ const updateActionItem = async (req, res) => {
 const deleteActionItem = async (req, res) => {
   try {
     const { id: actionItemId } = req.params;
-    await actionItemService.deleteActionItem(actionItemId);
+    const io = req.app.get("io");
+    await actionItemService.deleteActionItem(actionItemId, req.user?.id, io);
 
     res.status(200).json({
       success: true,
@@ -324,6 +358,32 @@ const deleteActionItem = async (req, res) => {
   }
 };
 
+// Convert action item to Kanban task (Day 19)
+const convertActionItemToTask = async (req, res) => {
+  try {
+    const { id: actionItemId } = req.params;
+    const io = req.app.get("io");
+    const result = await actionItemService.convertActionItemToTask(
+      actionItemId,
+      req.body,
+      req.user.id,
+      io
+    );
+
+    res.status(201).json({
+      success: true,
+      message: `Action item successfully converted to task "${result.task.title}"`,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Convert action item to task error:", error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to convert action item to task",
+    });
+  }
+};
+
 module.exports = {
   generateTranscript,
   getTranscript,
@@ -332,10 +392,12 @@ module.exports = {
   exportTranscript,
   generateSummary,
   getSummary,
+  trustSummary,
   deleteSummary,
   exportSummary,
   toggleActionItem,
   createActionItem,
   updateActionItem,
   deleteActionItem,
+  convertActionItemToTask,
 };

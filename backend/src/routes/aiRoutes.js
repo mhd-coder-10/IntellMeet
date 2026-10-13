@@ -16,13 +16,15 @@ router.get("/meetings/:id/transcript/export", protect, aiController.exportTransc
 // Meeting Summary & Action Item Endpoints (Day 16)
 router.post("/meetings/:id/summary/generate", protect, aiController.generateSummary);
 router.get("/meetings/:id/summary", protect, aiController.getSummary);
+router.patch("/meetings/:id/summary/trust", protect, aiController.trustSummary);
 router.delete("/meetings/:id/summary", protect, aiController.deleteSummary);
 router.get("/meetings/:id/summary/export", protect, aiController.exportSummary);
 
-// Action Item Specific Endpoints
+// Action Item Specific Endpoints (Day 19)
 router.patch("/action-items/:id/toggle", protect, aiController.toggleActionItem);
 router.post("/meetings/:id/action-items", protect, aiController.createActionItem);
 router.put("/action-items/:id", protect, aiController.updateActionItem);
 router.delete("/action-items/:id", protect, aiController.deleteActionItem);
+router.post("/action-items/:id/convert-to-task", protect, aiController.convertActionItemToTask);
 
 module.exports = router;
