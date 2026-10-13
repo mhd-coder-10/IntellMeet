@@ -23,6 +23,14 @@ export interface MeetingSummary {
     avatar?: string;
   } | null;
   error?: string | null;
+  isTrusted?: boolean;
+  trustedBy?: {
+    _id: string;
+    name: string;
+    username: string;
+    avatar?: string;
+  } | null;
+  trustedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -45,6 +53,26 @@ export interface MeetingActionItem {
   dueDateText?: string;
   completedAt?: string | null;
   isAiGenerated: boolean;
+  isConverted?: boolean;
+  convertedTask?: {
+    _id: string;
+    title: string;
+    status?: string;
+    columnId?: string;
+  } | string | null;
+  convertedProject?: {
+    _id: string;
+    name: string;
+    color?: string;
+  } | string | null;
+  convertedTeam?: {
+    _id: string;
+    name: string;
+    color?: string;
+  } | string | null;
+  convertedAt?: string | null;
+  isWorkspaceTaskDeleted?: boolean;
+  updateCount?: number;
   createdAt: string;
   updatedAt: string;
 }

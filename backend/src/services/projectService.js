@@ -148,6 +148,32 @@ const deleteProject = async (projectId, userId) => {
 
   // Cascading delete: delete all tasks within this project board
   const teamId = project.team;
+
+  try {
+    const tasksWithActionItems = await Task.find({
+      project: projectId,
+      actionItemId: { $ne: null },
+    }).select("actionItemId");
+
+    if (tasksWithActionItems.length > 0) {
+      const ActionItem = require("../models/ActionItem");
+      const itemIds = tasksWithActionItems.map((t) => t.actionItemId);
+      await ActionItem.updateMany(
+        { _id: { $in: itemIds } },
+        {
+          isConverted: false,
+          convertedTask: null,
+          convertedProject: null,
+          convertedTeam: null,
+          convertedAt: null,
+          isWorkspaceTaskDeleted: true,
+        }
+      );
+    }
+  } catch (syncErr) {
+    console.warn("Failed to reset action items during project deletion:", syncErr.message);
+  }
+
   await Task.deleteMany({ project: projectId });
   await Project.findByIdAndDelete(projectId);
 

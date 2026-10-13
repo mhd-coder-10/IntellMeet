@@ -29,6 +29,7 @@ export interface KanbanTask {
   meeting?: string | null;
   actionItemId?: string | null;
   comments?: TaskComment[];
+  updateCount?: number;
   createdAt: string;
   updatedAt: string;
 }

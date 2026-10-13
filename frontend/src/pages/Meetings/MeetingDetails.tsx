@@ -803,6 +803,7 @@ export default function MeetingDetails() {
         <SummaryAndActionItemsCard
           meetingId={meeting._id}
           meetingTitle={meeting.title}
+          hostId={typeof meeting.host === "string" ? meeting.host : meeting.host?._id}
           hasRecordings={recordingsList.length > 0}
           hasTranscript={false}
           participants={[meeting.host, ...(meeting.participants || [])]}

@@ -5,10 +5,12 @@
 import api from "./api";
 import type { MeetingTranscript, GenerateTranscriptPayload } from "@/types/transcript";
 import type {
+  MeetingSummary,
   MeetingSummaryResponse,
   GenerateSummaryPayload,
   CreateActionItemPayload,
   MeetingActionItem,
+  ActionItemPriority,
 } from "@/types/summary";
 
 /**
@@ -111,6 +113,16 @@ export const generateMeetingSummary = async (
 };
 
 /**
+ * Mark meeting summary as trusted and finalized
+ */
+export const trustMeetingSummary = async (
+  meetingId: string
+): Promise<{ summary: MeetingSummary }> => {
+  const response = await api.patch(`/ai/meetings/${meetingId}/summary/trust`);
+  return response.data.data;
+};
+
+/**
  * Delete meeting summary and action items
  */
 export const deleteMeetingSummary = async (meetingId: string): Promise<void> => {
@@ -180,4 +192,28 @@ export const deleteMeetingActionItem = async (
   actionItemId: string
 ): Promise<void> => {
   await api.delete(`/ai/action-items/${actionItemId}`);
+};
+
+/**
+ * Convert an action item to a Kanban task on a project board (Day 19)
+ */
+export const convertActionItemToTask = async (
+  actionItemId: string,
+  payload: {
+    teamId: string;
+    projectId: string;
+    columnId?: string;
+    title?: string;
+    description?: string;
+    priority?: ActionItemPriority;
+    assignee?: string;
+    dueDate?: string;
+    tags?: string[];
+  }
+): Promise<{ actionItem: MeetingActionItem; task: any }> => {
+  const response = await api.post(
+    `/ai/action-items/${actionItemId}/convert-to-task`,
+    payload
+  );
+  return response.data.data;
 };

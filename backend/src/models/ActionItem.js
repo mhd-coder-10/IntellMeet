@@ -64,6 +64,38 @@ const actionItemSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    isConverted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    convertedTask: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Task",
+      default: null,
+    },
+    convertedProject: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Project",
+      default: null,
+    },
+    convertedTeam: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Team",
+      default: null,
+    },
+    convertedAt: {
+      type: Date,
+      default: null,
+    },
+    isWorkspaceTaskDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    updateCount: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );

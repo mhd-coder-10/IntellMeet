@@ -30,6 +30,9 @@ const generateSummary = async (meetingId, userId, options = {}) => {
   if (existingSummary && !forceRegenerate) {
     const existingActionItems = await ActionItem.find({ meeting: meetingId })
       .populate("assignee", "name username avatar")
+      .populate("convertedProject", "name color")
+      .populate("convertedTeam", "name color")
+      .populate("convertedTask", "title status columnId")
       .sort({ createdAt: 1 });
     return { summary: existingSummary, actionItems: existingActionItems };
   }
@@ -166,7 +169,7 @@ Respond STRICTLY with valid JSON matching this schema:
   if (jsonMatch) {
     try {
       parsed = JSON.parse(jsonMatch[0]);
-    } catch {}
+    } catch { }
   }
 
   // Fallback defaults if parsing was partial
@@ -252,6 +255,9 @@ Respond STRICTLY with valid JSON matching this schema:
   // Fetch all action items for this meeting (including any manual ones)
   const allActionItems = await ActionItem.find({ meeting: meetingId })
     .populate("assignee", "name username avatar")
+    .populate("convertedProject", "name color")
+    .populate("convertedTeam", "name color")
+    .populate("convertedTask", "title status columnId")
     .sort({ createdAt: 1 });
 
   return {
@@ -264,23 +270,82 @@ Respond STRICTLY with valid JSON matching this schema:
  * Get summary and action items for a meeting
  */
 const getSummaryByMeetingId = async (meetingId) => {
-  const summary = await Summary.findOne({ meeting: meetingId }).populate(
-    "generatedBy",
-    "name username avatar"
-  );
+  const summary = await Summary.findOne({ meeting: meetingId })
+    .populate("generatedBy", "name username avatar profilePicture")
+    .populate("trustedBy", "name username avatar profilePicture");
+
   const actionItems = await ActionItem.find({ meeting: meetingId })
     .populate("assignee", "name username avatar")
+    .populate("convertedProject", "name color")
+    .populate("convertedTeam", "name color")
+    .populate("convertedTask", "title status columnId")
     .sort({ createdAt: 1 });
 
   return { summary, actionItems };
 };
 
 /**
- * Delete summary and all associated action items
+ * Mark summary as trusted and finalized (Meeting host only)
  */
-const deleteSummary = async (meetingId) => {
+const trustSummary = async (meetingId, userId) => {
+  const meeting = await Meeting.findById(meetingId);
+  if (!meeting) {
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const isHost = meeting.host && meeting.host.toString() === userId.toString();
+  if (!isHost) {
+    const error = new Error("Permission Denied: Only the meeting host can mark the summary as trusted");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const summary = await Summary.findOne({ meeting: meetingId });
+  if (!summary) {
+    const error = new Error("Summary not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  summary.isTrusted = true;
+  summary.trustedBy = userId;
+  summary.trustedAt = new Date();
+  await summary.save();
+
+  return await Summary.findById(summary._id)
+    .populate("generatedBy", "name username avatar profilePicture")
+    .populate("trustedBy", "name username avatar profilePicture");
+};
+
+/**
+ * Delete summary and all associated action items (Host only, and cannot delete if trusted)
+ */
+const deleteSummary = async (meetingId, userId) => {
+  const meeting = await Meeting.findById(meetingId);
+  if (!meeting) {
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const isHost = meeting.host && meeting.host.toString() === userId.toString();
+  if (!isHost) {
+    const error = new Error("Permission Denied: Only the meeting host can delete the summary");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const summary = await Summary.findOne({ meeting: meetingId });
+  if (summary && summary.isTrusted) {
+    const error = new Error("This summary is marked as Trusted and finalized. It cannot be deleted.");
+    error.statusCode = 400;
+    throw error;
+  }
+
   await Summary.deleteOne({ meeting: meetingId });
-  await ActionItem.deleteMany({ meeting: meetingId, isAiGenerated: true });
+  await ActionItem.deleteMany({ meeting: meetingId });
 };
 
 /**
@@ -392,6 +457,7 @@ const exportSummary = async (meetingId, format = "txt") => {
 module.exports = {
   generateSummary,
   getSummaryByMeetingId,
+  trustSummary,
   deleteSummary,
   exportSummary,
 };

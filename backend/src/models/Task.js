@@ -102,6 +102,14 @@ const taskSchema = new mongoose.Schema(
       default: null,
     },
     comments: [taskCommentSchema],
+    updateCount: {
+      type: Number,
+      default: 0,
+    },
+    lastDueReminderSentAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

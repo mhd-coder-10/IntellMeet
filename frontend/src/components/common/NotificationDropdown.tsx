@@ -78,6 +78,11 @@ function getNotificationIcon(type: NotificationType) {
         icon: MessageSquare,
         bg: "bg-cyan-50 text-cyan-600 border-cyan-200",
       };
+    case "task_due":
+      return {
+        icon: Clock,
+        bg: "bg-rose-50 text-rose-600 border-rose-200",
+      };
     case "task_deleted":
       return {
         icon: AlertCircle,
@@ -126,8 +131,9 @@ export function NotificationDropdown() {
     if (!socket || !isConnected) return;
 
     const handleNewNotification = (newNotif: AppNotification) => {
-      // Show instant toast notification
+      // Show instant toast notification (with unique id to prevent duplicate popups)
       toast.info(newNotif.title, {
+        id: `notif-${newNotif._id}`,
         description: newNotif.message,
         action: newNotif.link
           ? {

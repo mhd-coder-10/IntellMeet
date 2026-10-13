@@ -61,6 +61,20 @@ const summarySchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    isTrusted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    trustedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    trustedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

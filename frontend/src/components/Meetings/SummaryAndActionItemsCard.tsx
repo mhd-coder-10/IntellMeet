@@ -2,7 +2,8 @@
 // Displays Executive Overview, Key Discussion Points, Decisions Made,
 // and interactive Action Items checklist with assignees and priority badges
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -24,26 +25,37 @@ import {
   TrendingUp,
   Pencil,
   X,
+  FolderKanban,
+  ShieldCheck,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   getMeetingSummary,
   generateMeetingSummary,
   downloadMeetingSummary,
+  trustMeetingSummary,
+  deleteMeetingSummary,
   toggleActionItemStatus,
   createMeetingActionItem,
   updateMeetingActionItem,
   deleteMeetingActionItem,
+  convertActionItemToTask,
 } from "@/services/aiService";
+import { getUserTeams, getProjectsByTeam } from "@/services/teamService";
+import { useSocket } from "@/hooks/useSocket";
+import { useAuthStore } from "@/store/authStore";
 import type {
   MeetingSummaryResponse,
   MeetingActionItem,
   ActionItemPriority,
 } from "@/types/summary";
+import type { Team, ProjectBoard } from "@/types/team";
 
 interface Props {
   meetingId: string;
   meetingTitle?: string;
+  hostId?: string;
   hasRecordings?: boolean;
   hasTranscript?: boolean;
   participants?: Array<{ _id: string; name: string; username: string }>;
@@ -52,17 +64,103 @@ interface Props {
 export function SummaryAndActionItemsCard({
   meetingId,
   meetingTitle = "Meeting",
+  hostId,
   hasRecordings = true,
   hasTranscript = false,
   participants = [],
 }: Props) {
   const queryClient = useQueryClient();
+  const { socket, isConnected } = useSocket();
   const canGenerate = Boolean(hasRecordings || hasTranscript);
   const [isCopied, setIsCopied] = useState(false);
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [newTask, setNewTask] = useState("");
   const [newAssigneeName, setNewAssigneeName] = useState("");
   const [newPriority, setNewPriority] = useState<ActionItemPriority>("medium");
+
+  const { user: currentUser } = useAuthStore();
+  const currentUserId = currentUser?._id || currentUser?.id;
+  const isHost = Boolean(
+    currentUserId &&
+    hostId &&
+    String(currentUserId) === String(hostId)
+  );
+
+  const [isTrustConfirmOpen, setIsTrustConfirmOpen] = useState(false);
+  const [isDeleteSummaryConfirmOpen, setIsDeleteSummaryConfirmOpen] = useState(false);
+  const [deletingActionItemId, setDeletingActionItemId] = useState<string | null>(null);
+
+  // Real-time synchronization for action items & summary
+  useEffect(() => {
+    if (!socket || !isConnected || !meetingId) return;
+
+    socket.emit("meeting:join", { meetingId });
+
+    const handleActionItemUpdated = (updatedItem: MeetingActionItem) => {
+      queryClient.setQueryData(
+        ["meeting-summary", meetingId],
+        (old: MeetingSummaryResponse | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            actionItems: old.actionItems.map((item) =>
+              item._id === updatedItem._id ? updatedItem : item
+            ),
+          };
+        }
+      );
+    };
+
+    const handleSummaryDeleted = () => {
+      queryClient.setQueryData(["meeting-summary", meetingId], {
+        summary: null,
+        actionItems: [],
+      });
+      toast.info("Meeting summary was deleted by the host.");
+    };
+
+    const handleSummaryTrusted = (payload: { summary: any }) => {
+      queryClient.setQueryData(
+        ["meeting-summary", meetingId],
+        (old: MeetingSummaryResponse | undefined) => {
+          if (!old) return old;
+          return { ...old, summary: payload.summary };
+        }
+      );
+      toast.success("Summary verified & marked as trusted by host!");
+    };
+
+    const handleSummaryCompleted = () => {
+      queryClient.invalidateQueries({ queryKey: ["meeting-summary", meetingId] });
+    };
+
+    const handleActionItemDeleted = (payload: { _id: string }) => {
+      queryClient.setQueryData(
+        ["meeting-summary", meetingId],
+        (old: MeetingSummaryResponse | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            actionItems: old.actionItems.filter((item) => item._id !== payload._id),
+          };
+        }
+      );
+    };
+
+    socket.on("action_item:updated", handleActionItemUpdated);
+    socket.on("action_item:deleted", handleActionItemDeleted);
+    socket.on("summary:deleted", handleSummaryDeleted);
+    socket.on("summary:trusted", handleSummaryTrusted);
+    socket.on("summary:completed", handleSummaryCompleted);
+
+    return () => {
+      socket.off("action_item:updated", handleActionItemUpdated);
+      socket.off("action_item:deleted", handleActionItemDeleted);
+      socket.off("summary:deleted", handleSummaryDeleted);
+      socket.off("summary:trusted", handleSummaryTrusted);
+      socket.off("summary:completed", handleSummaryCompleted);
+    };
+  }, [socket, isConnected, meetingId, queryClient]);
 
   // Inline editing state
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -84,10 +182,10 @@ export function SummaryAndActionItemsCard({
   const summary = summaryData?.summary;
   const actionItems = summaryData?.actionItems || [];
 
-  // Generate / Regenerate mutation
+  // Generate mutation
   const generateMutation = useMutation({
     mutationFn: () =>
-      generateMeetingSummary(meetingId, { forceRegenerate: true }),
+      generateMeetingSummary(meetingId, { forceRegenerate: false }),
     onSuccess: (data) => {
       queryClient.setQueryData(["meeting-summary", meetingId], data);
       toast.success("AI Summary & Action Items generated successfully!");
@@ -96,6 +194,41 @@ export function SummaryAndActionItemsCard({
       toast.error(
         err?.response?.data?.message || "Failed to generate meeting summary"
       );
+    },
+  });
+
+  // Trust summary mutation (Host only)
+  const trustSummaryMutation = useMutation({
+    mutationFn: () => trustMeetingSummary(meetingId),
+    onSuccess: (data) => {
+      queryClient.setQueryData(
+        ["meeting-summary", meetingId],
+        (old: MeetingSummaryResponse | undefined) => {
+          if (!old) return old;
+          return { ...old, summary: data.summary };
+        }
+      );
+      setIsTrustConfirmOpen(false);
+      toast.success("Summary marked as Trusted & Finalized!");
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || "Failed to mark summary as trusted");
+    },
+  });
+
+  // Delete summary mutation (Host only)
+  const deleteSummaryMutation = useMutation({
+    mutationFn: () => deleteMeetingSummary(meetingId),
+    onSuccess: () => {
+      queryClient.setQueryData(["meeting-summary", meetingId], {
+        summary: null,
+        actionItems: [],
+      });
+      setIsDeleteSummaryConfirmOpen(false);
+      toast.success("Summary and action items deleted successfully");
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || "Failed to delete summary");
     },
   });
 
@@ -211,10 +344,140 @@ export function SummaryAndActionItemsCard({
           };
         }
       );
+      setDeletingActionItemId(null);
       toast.success("Action item removed");
     },
-    onError: () => {
-      toast.error("Failed to remove action item");
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || "Failed to remove action item");
+    },
+  });
+
+  // Convert Action Item to Kanban Task (Day 19) state
+  const [convertModalItem, setConvertModalItem] = useState<MeetingActionItem | null>(null);
+  const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [selectedColumnId, setSelectedColumnId] = useState("col-todo");
+  const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskDescription, setTaskDescription] = useState("");
+  const [taskPriority, setTaskPriority] = useState<ActionItemPriority>("medium");
+  const [taskDueDate, setTaskDueDate] = useState("");
+  const [taskTags, setTaskTags] = useState("Meeting, ActionItem");
+
+  // Fetch workspaces for Convert to Task modal
+  const { data: userTeams = [] } = useQuery<Team[]>({
+    queryKey: ["userTeams"],
+    queryFn: () => getUserTeams(),
+    staleTime: 1000 * 60,
+  });
+
+  const activeTeams = useMemo(() => {
+    return userTeams.filter(
+      (t) => t.currentUserStatus === "active" || !t.currentUserStatus
+    );
+  }, [userTeams]);
+
+  // Fetch project boards for selected team
+  const { data: teamProjects = [] } = useQuery<ProjectBoard[]>({
+    queryKey: ["team-projects", selectedTeamId],
+    queryFn: () => getProjectsByTeam(selectedTeamId),
+    enabled: !!selectedTeamId,
+    staleTime: 1000 * 30,
+  });
+
+  // Active members of selected team
+  const selectedTeamMembers = useMemo(() => {
+    const t = activeTeams.find((team) => team._id === selectedTeamId);
+    if (!t || !t.members) return [];
+    return t.members
+      .filter((m) => m.status === "active" || !m.status)
+      .map((m) => m.user)
+      .filter(Boolean);
+  }, [activeTeams, selectedTeamId]);
+
+  // Auto-set selectedProjectId when teamProjects loads
+  useEffect(() => {
+    if (teamProjects.length > 0 && !selectedProjectId) {
+      setSelectedProjectId(teamProjects[0]._id);
+    }
+  }, [teamProjects, selectedProjectId]);
+
+  // Auto-match assignee from meeting attendee to workspace team member
+  useEffect(() => {
+    if (convertModalItem && selectedTeamMembers.length > 0 && !selectedAssigneeId) {
+      const match = selectedTeamMembers.find(
+        (m: any) =>
+          (convertModalItem.assignee?._id && m._id === convertModalItem.assignee._id) ||
+          (convertModalItem.assigneeName &&
+            (m.name?.toLowerCase().includes(convertModalItem.assigneeName.toLowerCase()) ||
+              m.username?.toLowerCase().includes(convertModalItem.assigneeName.toLowerCase())))
+      );
+      if (match) {
+        setSelectedAssigneeId((match as any)._id);
+      }
+    }
+  }, [selectedTeamMembers, convertModalItem, selectedAssigneeId]);
+
+  // Open convert modal
+  const handleOpenConvertModal = (item: MeetingActionItem) => {
+    setConvertModalItem(item);
+    setTaskTitle(item.task);
+    setTaskDescription(`Action item from meeting "${meetingTitle}": ${item.task}`);
+    setTaskPriority(item.priority || "medium");
+    setTaskDueDate(
+      item.dueDate ? new Date(item.dueDate).toISOString().split("T")[0] : ""
+    );
+    setTaskTags("Meeting, ActionItem");
+    setSelectedColumnId("col-todo");
+
+    const defaultTeam = activeTeams[0];
+    if (defaultTeam) {
+      setSelectedTeamId(defaultTeam._id);
+    } else {
+      setSelectedTeamId("");
+    }
+    setSelectedProjectId("");
+    setSelectedAssigneeId(item.assignee?._id || "");
+  };
+
+  // Convert mutation
+  const convertTaskMutation = useMutation({
+    mutationFn: () => {
+      if (!convertModalItem) throw new Error("No item selected");
+      return convertActionItemToTask(convertModalItem._id, {
+        teamId: selectedTeamId,
+        projectId: selectedProjectId,
+        columnId: selectedColumnId,
+        title: taskTitle.trim(),
+        description: taskDescription.trim(),
+        priority: taskPriority,
+        assignee: selectedAssigneeId || undefined,
+        dueDate: taskDueDate || undefined,
+        tags: taskTags.split(",").map((t) => t.trim()).filter(Boolean),
+      });
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(
+        ["meeting-summary", meetingId],
+        (old: MeetingSummaryResponse | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            actionItems: old.actionItems.map((item) =>
+              item._id === data.actionItem._id ? data.actionItem : item
+            ),
+          };
+        }
+      );
+      queryClient.invalidateQueries({ queryKey: ["tasks", selectedProjectId] });
+      queryClient.invalidateQueries({ queryKey: ["team", selectedTeamId] });
+      toast.success("Action item converted to Kanban task successfully!");
+      setConvertModalItem(null);
+    },
+    onError: (err: any) => {
+      toast.error(
+        err?.response?.data?.message || "Failed to convert action item to task"
+      );
     },
   });
 
@@ -341,36 +604,83 @@ export function SummaryAndActionItemsCard({
               </>
             )}
 
-            <Button
-              size="sm"
-              onClick={() => {
-                if (!canGenerate) {
-                  toast.error("Please record the meeting first to generate summary.");
-                  return;
-                }
-                generateMutation.mutate();
-              }}
-              disabled={generateMutation.isPending || isLoading || (!canGenerate && !summary)}
-              title={!canGenerate && !summary ? "Recording required to generate summary" : undefined}
-              className="h-8 px-3 text-xs bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg shadow-sm gap-1.5 transition-all"
-            >
-              {generateMutation.isPending ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Summarizing...
-                </>
-              ) : summary ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Regenerate
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Generate Summary
-                </>
-              )}
-            </Button>
+            {summary ? (
+              <div className="flex items-center gap-2">
+                {summary.isTrusted ? (
+                  // TRUSTED & FINALIZED BADGE (Delete icon removed)
+                  <span
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-xs"
+                    title={`Verified and finalized as official source of truth by host`}
+                  >
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <span>Trusted & Finalized</span>
+                  </span>
+                ) : (
+                  // DRAFT STATE (Awaiting Host Trust)
+                  <>
+                    {isHost ? (
+                      <div className="flex items-center gap-1.5">
+                        {/* TRUST BUTTON */}
+                        <Button
+                          size="sm"
+                          onClick={() => setIsTrustConfirmOpen(true)}
+                          disabled={trustSummaryMutation.isPending}
+                          className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg shadow-xs gap-1.5 transition-all cursor-pointer"
+                          title="Verify and finalize this summary (locks source of truth and removes delete)"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5 text-white" />
+                          <span>Trust Summary</span>
+                        </Button>
+
+                        {/* DELETE BUTTON */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setIsDeleteSummaryConfirmOpen(true)}
+                          disabled={deleteSummaryMutation.isPending}
+                          className="h-8 px-2.5 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg gap-1.5 transition-all cursor-pointer"
+                          title="Delete summary to regenerate a new one"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                          <span>Delete</span>
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-[11px] text-slate-400 italic bg-slate-800/60 px-2.5 py-1 rounded-lg border border-slate-700/60">
+                        Draft Summary (Pending Host Verification)
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (
+              // NO SUMMARY YET - SHOW GENERATE BUTTON
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (!canGenerate) {
+                    toast.error("Please record the meeting first to generate summary.");
+                    return;
+                  }
+                  generateMutation.mutate();
+                }}
+                disabled={generateMutation.isPending || isLoading || !canGenerate}
+                title={!canGenerate ? "Recording required to generate summary" : undefined}
+                className="h-8 px-3 text-xs bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg shadow-sm gap-1.5 transition-all"
+              >
+                {generateMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Generating Summary...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Generate Summary
+                  </>
+                )}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -446,23 +756,29 @@ export function SummaryAndActionItemsCard({
                   </p>
                 </div>
                 <div className="pt-1 flex justify-center">
-                  <Button
-                    onClick={() => generateMutation.mutate()}
-                    disabled={generateMutation.isPending}
-                    className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-4 py-2 h-8 rounded-xl shadow gap-1.5"
-                  >
-                    {generateMutation.isPending ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Extracting Summary...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-3.5 h-3.5" />
-                        Generate Summary & Tasks
-                      </>
-                    )}
-                  </Button>
+                  {isHost ? (
+                    <Button
+                      onClick={() => generateMutation.mutate()}
+                      disabled={generateMutation.isPending}
+                      className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-4 py-2 h-8 rounded-xl shadow gap-1.5"
+                    >
+                      {generateMutation.isPending ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Extracting Summary...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          Generate Summary & Tasks
+                        </>
+                      )}
+                    </Button>
+                  ) : (
+                    <p className="text-xs text-slate-400 italic">
+                      Waiting for meeting host to generate AI summary.
+                    </p>
+                  )}
                 </div>
               </>
             )}
@@ -538,15 +854,17 @@ export function SummaryAndActionItemsCard({
                   </h4>
                 </div>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsAddingItem(!isAddingItem)}
-                  className="h-7 px-2 text-xs rounded-lg border-slate-200 text-slate-700 hover:bg-slate-50 gap-1"
-                >
-                  <Plus className="w-3 h-3 text-purple-600" />
-                  Add Task
-                </Button>
+                {isHost && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsAddingItem(!isAddingItem)}
+                    className="h-7 px-2 text-xs rounded-lg border-slate-200 text-slate-700 hover:bg-slate-50 gap-1"
+                  >
+                    <Plus className="w-3 h-3 text-purple-600" />
+                    Add Task
+                  </Button>
+                )}
               </div>
 
               {/* Inline Add Action Item Form */}
@@ -626,6 +944,20 @@ export function SummaryAndActionItemsCard({
                 ) : (
                   actionItems.map((item: MeetingActionItem) => {
                     const isDone = item.status === "completed";
+                    const itemAssigneeId =
+                      typeof item.assignee === "object" ? item.assignee?._id : item.assignee;
+                    const isItemAssignee = Boolean(
+                      currentUserId &&
+                        ((itemAssigneeId && String(currentUserId) === String(itemAssigneeId)) ||
+                          (item.assigneeName &&
+                            currentUser &&
+                            (item.assigneeName.toLowerCase() === (currentUser.name || "").toLowerCase() ||
+                              item.assigneeName.toLowerCase() ===
+                                (currentUser.username || "").toLowerCase())))
+                    );
+                    const canConvertToKanban =
+                      (isHost || isItemAssignee) && !item.isConverted && !item.isWorkspaceTaskDeleted;
+
                     if (editingItemId === item._id) {
                       return (
                         <div
@@ -771,6 +1103,17 @@ export function SummaryAndActionItemsCard({
                               {item.priority}
                             </span>
 
+                            {/* Updated Counter Badge */}
+                            {item.updateCount && item.updateCount > 0 ? (
+                              <span
+                                className="inline-flex items-center gap-1 font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md text-[10px]"
+                                title={`Synchronized revision (${item.updateCount} updates)`}
+                              >
+                                <RefreshCw className="w-2.5 h-2.5 text-emerald-600" />
+                                <span>{item.updateCount === 1 ? "Updated" : `Updated ${item.updateCount}x`}</span>
+                              </span>
+                            ) : null}
+
                             {/* Timeframe / Due */}
                             {item.dueDateText && item.dueDateText !== "TBD" && (
                               <span className="inline-flex items-center gap-1 text-slate-500">
@@ -778,26 +1121,64 @@ export function SummaryAndActionItemsCard({
                                 {item.dueDateText}
                               </span>
                             )}
+
+                            {/* Converted to Task Link or Convert Button or Deleted from Workspace */}
+                            {item.isConverted && item.convertedProject ? (
+                              <Link
+                                to={`/teams/${(item.convertedTeam as any)?._id || item.convertedTeam}/projects/${(item.convertedProject as any)?._id || item.convertedProject}`}
+                                className="inline-flex items-center gap-1 font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300 px-2 py-0.5 rounded-md transition"
+                                title="Open in Kanban Project Board"
+                              >
+                                <FolderKanban className="w-2.5 h-2.5 text-indigo-600" />
+                                <span>Board: {(item.convertedProject as any)?.name || "Kanban"} ↗</span>
+                              </Link>
+                            ) : item.isWorkspaceTaskDeleted ? (
+                              <span
+                                className="inline-flex items-center gap-1 font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md text-[10px]"
+                                title="This task was deleted from the workspace Kanban board"
+                              >
+                                <AlertCircle className="w-2.5 h-2.5 text-rose-600" />
+                                <span>Deleted from Workspace</span>
+                              </span>
+                            ) : canConvertToKanban ? (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenConvertModal(item)}
+                                className="inline-flex items-center gap-1 font-semibold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 hover:border-purple-300 px-2 py-0.5 rounded-md transition cursor-pointer"
+                                title="Convert Action Item to Kanban Project Task"
+                              >
+                                <FolderKanban className="w-2.5 h-2.5 text-purple-600" />
+                                <span>Convert to Task</span>
+                              </button>
+                            ) : null}
                           </div>
                         </div>
 
-                        {/* Edit & Delete Action Buttons (hover only) */}
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition shrink-0">
-                          <button
-                            onClick={() => handleStartEdit(item)}
-                            className="text-slate-300 hover:text-purple-600 p-1 rounded transition"
-                            title="Edit action item"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => deleteItemMutation.mutate(item._id)}
-                            className="text-slate-300 hover:text-red-500 p-1 rounded transition"
-                            title="Delete action item"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {/* Edit & Delete Action Buttons (Host only, strictly before Kanban conversion or if deleted from workspace) */}
+                        {isHost && !item.isConverted && (
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition shrink-0">
+                            {!item.isWorkspaceTaskDeleted && (
+                              <button
+                                onClick={() => handleStartEdit(item)}
+                                className="text-slate-300 hover:text-purple-600 p-1 rounded transition"
+                                title="Edit action item"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setDeletingActionItemId(item._id)}
+                              className="text-slate-300 hover:text-red-500 p-1 rounded transition"
+                              title={
+                                item.isWorkspaceTaskDeleted
+                                  ? "Delete removed task from summary"
+                                  : "Delete action item"
+                              }
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })
@@ -807,6 +1188,391 @@ export function SummaryAndActionItemsCard({
           </div>
         )}
       </div>
+
+      {/* CONVERT ACTION ITEM TO KANBAN TASK MODAL (DAY 19) */}
+      {convertModalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-white p-6 sm:p-7 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                  <FolderKanban className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                    Convert to Kanban Task
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Send this meeting action item directly to a project board.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConvertModalItem(null)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!taskTitle.trim()) {
+                  toast.error("Task title is required");
+                  return;
+                }
+                if (!selectedTeamId) {
+                  toast.error("Please select a workspace");
+                  return;
+                }
+                if (!selectedProjectId) {
+                  toast.error("Please select a project board");
+                  return;
+                }
+                convertTaskMutation.mutate();
+              }}
+              className="space-y-4"
+            >
+              {/* Task Title */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  Task Title <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={taskTitle}
+                  onChange={(e) => setTaskTitle(e.target.value)}
+                  placeholder="Task title..."
+                  className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              {/* Task Description */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  Description
+                </label>
+                <textarea
+                  value={taskDescription}
+                  onChange={(e) => setTaskDescription(e.target.value)}
+                  placeholder="Task details or context..."
+                  rows={2}
+                  className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                />
+              </div>
+
+              {/* Workspace & Project Board row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">
+                    Workspace <span className="text-red-500">*</span>
+                  </label>
+                  {activeTeams.length === 0 ? (
+                    <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                      No active workspaces found. Please join or create a team first.
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedTeamId}
+                      onChange={(e) => {
+                        setSelectedTeamId(e.target.value);
+                        setSelectedProjectId("");
+                      }}
+                      className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      required
+                    >
+                      <option value="">Select Workspace...</option>
+                      {activeTeams.map((t) => (
+                        <option key={t._id} value={t._id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">
+                    Project Board <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    disabled={!selectedTeamId || teamProjects.length === 0}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-slate-50 disabled:text-slate-400"
+                    required
+                  >
+                    <option value="">
+                      {!selectedTeamId
+                        ? "Select workspace first"
+                        : teamProjects.length === 0
+                        ? "No boards in this workspace"
+                        : "Select Board..."}
+                    </option>
+                    {teamProjects.map((p) => (
+                      <option key={p._id} value={p._id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Column & Priority row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">
+                    Kanban Column
+                  </label>
+                  <select
+                    value={selectedColumnId}
+                    onChange={(e) => setSelectedColumnId(e.target.value)}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="col-todo">To Do</option>
+                    <option value="col-in-progress">In Progress</option>
+                    <option value="col-review">Review</option>
+                    <option value="col-done">Done</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">
+                    Priority
+                  </label>
+                  <select
+                    value={taskPriority}
+                    onChange={(e) =>
+                      setTaskPriority(e.target.value as ActionItemPriority)
+                    }
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="low">Low Priority</option>
+                    <option value="medium">Medium Priority</option>
+                    <option value="high">High Priority</option>
+                    <option value="urgent">Urgent Priority</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Assignee & Due Date row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                    <span>Assignee</span>
+                    {convertModalItem.assigneeName && convertModalItem.assigneeName !== "Unassigned" && (
+                      <span className="text-[10px] text-purple-600 font-normal">
+                        Meeting: {convertModalItem.assigneeName}
+                      </span>
+                    )}
+                  </label>
+                  <select
+                    value={selectedAssigneeId}
+                    onChange={(e) => setSelectedAssigneeId(e.target.value)}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="">Unassigned</option>
+                    {selectedTeamMembers.map((member: any) => (
+                      <option key={member._id} value={member._id}>
+                        {member.name} {member.email ? `(${member.email})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">
+                    Due Date
+                  </label>
+                  <input
+                    type="date"
+                    value={taskDueDate}
+                    onChange={(e) => setTaskDueDate(e.target.value)}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+
+              {/* Tags */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  Tags (comma-separated)
+                </label>
+                <input
+                  type="text"
+                  value={taskTags}
+                  onChange={(e) => setTaskTags(e.target.value)}
+                  placeholder="e.g. Meeting, AI, ActionItem"
+                  className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setConvertModalItem(null)}
+                  className="rounded-xl border-slate-200 text-slate-600 text-xs h-10"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    convertTaskMutation.isPending ||
+                    !taskTitle.trim() ||
+                    !selectedTeamId ||
+                    !selectedProjectId
+                  }
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl text-xs h-10 px-5 shadow-xs flex items-center gap-1.5"
+                >
+                  {convertTaskMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Converting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <FolderKanban className="w-4 h-4" />
+                      <span>Convert & Add Task</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* TRUST / FINALIZE CONFIRM MODAL */}
+      {isTrustConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-100">
+              <ShieldCheck className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1.5">
+              <h3 className="text-base font-bold text-slate-900">
+                Mark Summary as Trusted?
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Once marked as trusted, this meeting summary becomes the official verified source of truth for all participants. The delete option will be permanently removed.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsTrustConfirmOpen(false)}
+                disabled={trustSummaryMutation.isPending}
+                className="rounded-xl border-slate-200 text-xs px-4"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => trustSummaryMutation.mutate()}
+                disabled={trustSummaryMutation.isPending}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold px-4 shadow-sm"
+              >
+                {trustSummaryMutation.isPending ? "Finalizing..." : "Confirm & Trust"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE SUMMARY CONFIRM MODAL */}
+      {isDeleteSummaryConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mx-auto border border-red-100">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1.5">
+              <h3 className="text-base font-bold text-slate-900">
+                Delete Meeting Summary?
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Are you sure? This will permanently delete this AI summary and all extracted action items from the database. A fresh summary can then be generated.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsDeleteSummaryConfirmOpen(false)}
+                disabled={deleteSummaryMutation.isPending}
+                className="rounded-xl border-slate-200 text-xs px-4"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => deleteSummaryMutation.mutate()}
+                disabled={deleteSummaryMutation.isPending}
+                className="bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold px-4 shadow-sm"
+              >
+                {deleteSummaryMutation.isPending ? "Deleting..." : "Delete Summary"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE ACTION ITEM CONFIRM MODAL */}
+      {deletingActionItemId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mx-auto border border-red-100">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1.5">
+              <h3 className="text-base font-bold text-slate-900">
+                Delete Action Item?
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Are you sure you want to delete this action item from the meeting summary? This action cannot be undone.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setDeletingActionItemId(null)}
+                disabled={deleteItemMutation.isPending}
+                className="rounded-xl border-slate-200 text-xs px-4"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  if (deletingActionItemId) {
+                    deleteItemMutation.mutate(deletingActionItemId);
+                  }
+                }}
+                disabled={deleteItemMutation.isPending}
+                className="bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold px-4 shadow-sm"
+              >
+                {deleteItemMutation.isPending ? "Deleting..." : "Delete Item"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
