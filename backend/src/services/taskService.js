@@ -504,19 +504,60 @@ const addComment = async (taskId, userId, text) => {
 
   await task.save();
 
-  // Send notification to assignee and creator
+  // Send notifications: priority to @mentions, then to assignee/creator
   try {
     const project = await Project.findById(task.project);
     const User = require("../models/User");
     const commenter = await User.findById(userId);
     const commenterName = commenter?.name || "A team member";
+    const senderIdStr = userId.toString();
+    const commentSnippet =
+      text.trim().length > 70 ? text.trim().slice(0, 67) + "..." : text.trim();
+    const boardLink = project
+      ? `/teams/${project.team}/projects/${project._id}`
+      : "";
 
+    // 1. Process explicit @mentions
+    const mentionMatches = text.trim().match(/@([a-zA-Z0-9_.-]+)/g);
+    const mentionedUserIds = new Set();
+
+    if (mentionMatches && mentionMatches.length > 0) {
+      const mentionUsernames = [
+        ...new Set(mentionMatches.map((m) => m.slice(1).toLowerCase())),
+      ];
+
+      const matchedUsers = await User.find({
+        username: { $in: mentionUsernames.map((u) => new RegExp(`^${u}$`, "i")) },
+      }).select("_id name username profilePicture");
+
+      for (const targetUser of matchedUsers) {
+        const targetIdStr = targetUser._id.toString();
+        if (targetIdStr !== senderIdStr) {
+          mentionedUserIds.add(targetIdStr);
+          await notificationService.createNotification({
+            recipient: targetUser._id,
+            sender: userId,
+            type: "task_comment",
+            title: "Mentioned in Task Comment",
+            message: `${commenterName} mentioned you on task "${task.title}": "${commentSnippet}"`,
+            link: boardLink,
+          });
+        }
+      }
+    }
+
+    // 2. Generic comment notification for assignee and creator (unless already notified as @mentioned)
     const notifyRecipients = new Set();
-    if (task.assignee && task.assignee.toString() !== userId.toString()) {
+    if (task.assignee && task.assignee.toString() !== senderIdStr) {
       notifyRecipients.add(task.assignee.toString());
     }
-    if (task.creator && task.creator.toString() !== userId.toString()) {
+    if (task.creator && task.creator.toString() !== senderIdStr) {
       notifyRecipients.add(task.creator.toString());
+    }
+
+    // Exclude users who already received a high-priority mention notification
+    for (const mId of mentionedUserIds) {
+      notifyRecipients.delete(mId);
     }
 
     for (const recipientId of notifyRecipients) {
@@ -525,8 +566,8 @@ const addComment = async (taskId, userId, text) => {
         sender: userId,
         type: "task_comment",
         title: "New Task Comment",
-        message: `${commenterName} commented on "${task.title}": "${text.trim().slice(0, 70)}"`,
-        link: project ? `/teams/${project.team}/projects/${project._id}` : "",
+        message: `${commenterName} commented on "${task.title}": "${commentSnippet}"`,
+        link: boardLink,
       });
     }
   } catch (nErr) {

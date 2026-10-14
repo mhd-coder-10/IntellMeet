@@ -14,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/store/authStore";
 import { ChatMessage } from "./ChatMessage";
-import { ChatInput } from "./ChatInput";
+import { ChatInput, type MentionCandidate } from "./ChatInput";
 import { TypingIndicator } from "./TypingIndicator";
 import type { ChatMessage as ChatMessageType } from "@/types/chat";
 
@@ -22,6 +22,7 @@ interface Props {
   messages: ChatMessageType[];
   typingUsers: Record<string, string>;
   isHost: boolean;
+  mentionSuggestions?: MentionCandidate[];
   onSend: (text: string) => void;
   onTyping: (isTyping: boolean) => void;
   onDelete: (messageId: string) => void;
@@ -38,6 +39,7 @@ export function ChatPanel({
   messages,
   typingUsers,
   isHost,
+  mentionSuggestions = [],
   onSend,
   onTyping,
   onDelete,
@@ -207,7 +209,11 @@ export function ChatPanel({
       <TypingIndicator usernames={typingNames} />
 
       {/* Input Area */}
-      <ChatInput onSend={onSend} onTyping={onTyping} />
+      <ChatInput
+        onSend={onSend}
+        onTyping={onTyping}
+        mentionSuggestions={mentionSuggestions}
+      />
     </div>
   );
 }

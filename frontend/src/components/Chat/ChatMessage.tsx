@@ -2,7 +2,8 @@
 // Preserves all original logic, with non-blocking inline delete confirmation and copy-to-clipboard
 
 import { useState } from "react";
-import { Trash2, Copy, Check, Shield, ShieldAlert } from "lucide-react";
+import { Trash2, Copy, Check, Shield, ShieldAlert, AtSign } from "lucide-react";
+import { useAuthStore } from "@/store/authStore";
 import type { ChatMessage as ChatMessageType } from "@/types/chat";
 
 interface Props {
@@ -67,13 +68,13 @@ const formatTime = (iso: string) => {
   }
 };
 
-// Auto-detect and render clickable links in message text
-function renderMessageText(text: string) {
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  const parts = text.split(urlRegex);
+// Auto-detect and render clickable links and @mentions in message text
+function renderMessageText(text: string, currentUsername?: string) {
+  const tokenRegex = /(https?:\/\/[^\s]+|@[a-zA-Z0-9_.-]+)/g;
+  const parts = text.split(tokenRegex);
 
   return parts.map((part, index) => {
-    if (urlRegex.test(part)) {
+    if (/^https?:\/\//i.test(part)) {
       return (
         <a
           key={index}
@@ -87,14 +88,40 @@ function renderMessageText(text: string) {
         </a>
       );
     }
+    if (/^@[a-zA-Z0-9_.-]+$/.test(part)) {
+      const username = part.slice(1);
+      const isSelfMention =
+        Boolean(currentUsername) &&
+        username.toLowerCase() === currentUsername?.toLowerCase();
+      return (
+        <span
+          key={index}
+          className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md font-semibold text-xs tracking-wide align-baseline transition-all select-all ${
+            isSelfMention
+              ? "bg-purple-500/30 text-purple-200 border border-purple-400/50 shadow-xs ring-1 ring-purple-400/40"
+              : "bg-purple-500/20 text-purple-300 border border-purple-500/30"
+          }`}
+        >
+          <span className="opacity-80">@</span>
+          <span>{username}</span>
+        </span>
+      );
+    }
     return <span key={index}>{part}</span>;
   });
 }
 
 export function ChatMessage({ message, isOwn, canDelete, onDelete }: Props) {
+  const currentUser = useAuthStore((state) => state.user);
   const [isHovered, setIsHovered] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+
+  const isMentioned = Boolean(
+    currentUser?.username &&
+      !isOwn &&
+      new RegExp(`@${currentUser.username}\\b`, "i").test(message.message)
+  );
 
   const handleCopy = async () => {
     try {
@@ -236,14 +263,24 @@ export function ChatMessage({ message, isOwn, canDelete, onDelete }: Props) {
 
         {/* Bubble container */}
         <div className="relative group/bubble flex flex-col">
+          {/* Mentioned You Indicator */}
+          {isMentioned && (
+            <div className="flex items-center gap-1 text-[10px] font-semibold text-purple-300 bg-purple-900/50 border border-purple-500/40 px-2 py-0.5 rounded-full mb-1 w-fit shadow-xs animate-in fade-in select-none">
+              <AtSign className="w-2.5 h-2.5 text-purple-400" />
+              <span>Mentioned you</span>
+            </div>
+          )}
+
           <div
             className={`px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words shadow-sm transition-colors ${
               isOwn
                 ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl rounded-br-xs border border-blue-500/30 shadow-blue-900/10"
+                : isMentioned
+                ? "bg-gradient-to-br from-purple-950/60 via-gray-800/95 to-gray-800 text-gray-100 rounded-2xl rounded-tl-xs border border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.15)] ring-1 ring-purple-500/30"
                 : "bg-gray-800/90 hover:bg-gray-800 text-gray-100 rounded-2xl rounded-tl-xs border border-gray-700/60 shadow-black/20"
             }`}
           >
-            {renderMessageText(message.message)}
+            {renderMessageText(message.message, currentUser?.username)}
           </div>
 
           {/* Time & status for own message */}

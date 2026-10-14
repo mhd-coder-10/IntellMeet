@@ -1,20 +1,24 @@
-
-// Centralized axios instance with JWT auto-attach and singleton refresh
+// Centralized axios instance with HttpOnly cookies, credentials support, and singleton refresh
 // Multiple 401s share a single refresh call to avoid race conditions
 
 import axios from "axios";
+import { useAuthStore } from "@/store/authStore";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "http://localhost:5100/api",
   headers: { "Content-Type": "application/json" },
+  withCredentials: true, // Automatically sends and receives HttpOnly cookies
 });
 
-// Attach access token to every request
+// Attach memory access token if present as dual-compatibility fallback
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("accessToken");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  config.withCredentials = true;
+
+  const memoryToken = useAuthStore.getState().accessToken;
+  if (memoryToken) {
+    config.headers.Authorization = `Bearer ${memoryToken}`;
   }
+
   return config;
 });
 
@@ -22,24 +26,29 @@ api.interceptors.request.use((config) => {
 let refreshPromise: Promise<string> | null = null;
 
 const performRefresh = async (): Promise<string> => {
-  const refreshToken = localStorage.getItem("refreshToken");
-  if (!refreshToken) throw new Error("No refresh token");
-
   const baseURL = import.meta.env.VITE_API_URL || "http://localhost:5100/api";
-  const res = await axios.post(`${baseURL}/auth/refresh`, { refreshToken });
+  // Browser automatically sends HttpOnly refreshToken cookie with withCredentials: true
+  const res = await axios.post(
+    `${baseURL}/auth/refresh`,
+    {},
+    { withCredentials: true }
+  );
 
-  const newAccessToken = res.data.data.accessToken;
-  localStorage.setItem("accessToken", newAccessToken);
+  const newAccessToken = res.data?.data?.accessToken || "";
+  if (newAccessToken) {
+    useAuthStore.getState().setAccessToken(newAccessToken);
+  }
   return newAccessToken;
 };
 
 const clearAuthAndRedirect = () => {
-  localStorage.removeItem("accessToken");
-  localStorage.removeItem("refreshToken");
-  localStorage.removeItem("auth-storage");
+  useAuthStore.getState().clearAuth();
 
-  // Only redirect if not already on login
-  if (window.location.pathname !== "/login") {
+  // Only redirect if not already on login or register
+  if (
+    window.location.pathname !== "/login" &&
+    window.location.pathname !== "/register"
+  ) {
     window.location.href = "/login";
   }
 };
@@ -70,7 +79,9 @@ api.interceptors.response.use(
         }
 
         const newAccessToken = await refreshPromise;
-        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        if (newAccessToken) {
+          originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        }
 
         return api(originalRequest);
       } catch (refreshError) {

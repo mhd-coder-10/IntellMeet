@@ -6,7 +6,18 @@ const userRepo = require("../repositories/userRepository")
 
 const socketAuth = async (socket, next) => {
     try {
-        const token = socket.handshake.auth?.token || socket.handshake.query?.token
+        let token = socket.handshake.auth?.token || socket.handshake.query?.token
+
+        // Fallback to HttpOnly cookie sent in handshake headers
+        if (!token && socket.handshake.headers?.cookie) {
+            const raw = socket.handshake.headers.cookie
+            const parsed = raw.split(";").reduce((acc, part) => {
+                const [k, v] = part.trim().split("=")
+                if (k && v) acc[k] = decodeURIComponent(v)
+                return acc
+            }, {})
+            token = parsed.accessToken
+        }
 
         if (!token) {
             return next(new Error("Authentication error: Token required"))

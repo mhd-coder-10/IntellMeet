@@ -2,7 +2,7 @@
 // Shows local and remote videos, dynamic composite recording, recording preview, and meeting controls
 
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Users, Loader2, MessageSquare, Monitor } from "lucide-react";
@@ -120,6 +120,49 @@ export default function MeetingRoom() {
   ]);
 
   const isHost = meeting?.host._id === user?.id;
+
+  // Collect all participants available for @mentions in meeting chat
+  const mentionCandidates = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; name: string; username: string; profilePicture?: string }
+    >();
+
+    if (meeting?.host) {
+      map.set(meeting.host._id, {
+        id: meeting.host._id,
+        name: meeting.host.name,
+        username: meeting.host.username,
+        profilePicture: meeting.host.profilePicture,
+      });
+    }
+
+    if (Array.isArray(meeting?.participants)) {
+      meeting.participants.forEach((p) => {
+        if (p?._id) {
+          map.set(p._id, {
+            id: p._id,
+            name: p.name,
+            username: p.username,
+            profilePicture: p.profilePicture,
+          });
+        }
+      });
+    }
+
+    peers.forEach((peer) => {
+      if (peer?.userId && !map.has(peer.userId)) {
+        map.set(peer.userId, {
+          id: peer.userId,
+          name: peer.name || peer.username || "Participant",
+          username: peer.username || peer.name || "user",
+          profilePicture: peer.profilePicture,
+        });
+      }
+    });
+
+    return Array.from(map.values());
+  }, [meeting, peers]);
 
   const {
     startLocalStream,
@@ -1074,6 +1117,7 @@ export default function MeetingRoom() {
             messages={messages}
             typingUsers={typingUsers}
             isHost={isHost}
+            mentionSuggestions={mentionCandidates}
             onSend={sendMessage}
             onTyping={sendTyping}
             onDelete={deleteMessage}
