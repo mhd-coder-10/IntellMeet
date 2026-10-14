@@ -28,6 +28,47 @@ const saveMessage = async (meetingId, userId, message) => {
 
   await savedMessage.populate("sender", "name username profilePicture");
 
+  // Extract and process @mentions
+  const rawText = message.trim();
+  const mentionMatches = rawText.match(/@([a-zA-Z0-9_.-]+)/g);
+  if (mentionMatches && mentionMatches.length > 0) {
+    try {
+      const mentionUsernames = [
+        ...new Set(mentionMatches.map((m) => m.slice(1).toLowerCase())),
+      ];
+
+      const User = require("../models/User");
+      const notificationService = require("./notificationService");
+
+      const matchedUsers = await User.find({
+        username: { $in: mentionUsernames.map((u) => new RegExp(`^${u}$`, "i")) },
+      }).select("_id name username profilePicture");
+
+      const senderIdStr = userId.toString();
+      const senderName =
+        savedMessage.sender?.name || savedMessage.sender?.username || "A participant";
+      const snippet =
+        rawText.length > 70 ? rawText.slice(0, 67) + "..." : rawText;
+
+      for (const targetUser of matchedUsers) {
+        const targetIdStr = targetUser._id.toString();
+        // Do not notify self
+        if (targetIdStr !== senderIdStr) {
+          await notificationService.createNotification({
+            recipient: targetUser._id,
+            sender: userId,
+            type: "chat_mention",
+            title: "Mentioned in Meeting Chat",
+            message: `${senderName} mentioned you in "${meeting.title}": "${snippet}"`,
+            link: `/meetings/${meetingId}`,
+          });
+        }
+      }
+    } catch (mentionErr) {
+      console.warn("Failed to process meeting chat mentions:", mentionErr.message);
+    }
+  }
+
   return { message: savedMessage };
 };
 

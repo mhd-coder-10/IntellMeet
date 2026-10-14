@@ -1,6 +1,5 @@
-
 // Manages Socket.io connection lifecycle
-// Uses React state for socket so consumers re-render properly
+// Uses withCredentials to send HttpOnly auth cookies with memory-token fallback
 
 import { useEffect, useState } from "react";
 import { io, type Socket } from "socket.io-client";
@@ -12,18 +11,20 @@ const SOCKET_URL =
 export function useSocket() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const accessToken = useAuthStore((state) => state.accessToken);
 
   useEffect(() => {
-    if (!accessToken) {
+    if (!isAuthenticated && !accessToken) {
       setSocket(null);
       setIsConnected(false);
       return;
     }
 
     const newSocket = io(SOCKET_URL, {
-      auth: { token: accessToken },
-      transports: ["websocket"],
+      auth: { token: accessToken || "" },
+      withCredentials: true, // Send HttpOnly cookie with WebSocket handshake
+      transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
@@ -57,7 +58,7 @@ export function useSocket() {
       setSocket(null);
       setIsConnected(false);
     };
-  }, [accessToken]);
+  }, [isAuthenticated, accessToken]);
 
   return { socket, isConnected };
 }

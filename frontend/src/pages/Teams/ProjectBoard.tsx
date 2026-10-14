@@ -19,6 +19,7 @@ import {
   Pencil,
   MessageSquare,
   Send,
+  AtSign,
   Calendar,
   LayoutGrid,
   List,
@@ -109,6 +110,49 @@ const priorityStyles: Record<
   },
 };
 
+// Auto-detect and render clickable links and @mentions in task comments
+function renderCommentText(text: string, currentUsername?: string) {
+  const tokenRegex = /(https?:\/\/[^\s]+|@[a-zA-Z0-9_.-]+)/g;
+  const parts = text.split(tokenRegex);
+
+  return parts.map((part, index) => {
+    if (/^https?:\/\//i.test(part)) {
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline text-blue-600 hover:text-blue-800 break-all transition-colors underline-offset-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {part}
+        </a>
+      );
+    }
+    if (/^@[a-zA-Z0-9_.-]+$/.test(part)) {
+      const username = part.slice(1);
+      const isSelfMention =
+        Boolean(currentUsername) &&
+        username.toLowerCase() === currentUsername?.toLowerCase();
+      return (
+        <span
+          key={index}
+          className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md font-semibold text-[11px] align-baseline transition-all select-all ${
+            isSelfMention
+              ? "bg-purple-100 text-purple-700 border border-purple-300 font-bold shadow-2xs"
+              : "bg-blue-50 text-blue-700 border border-blue-200"
+          }`}
+        >
+          <span className="opacity-70">@</span>
+          <span>{username}</span>
+        </span>
+      );
+    }
+    return <span key={index}>{part}</span>;
+  });
+}
+
 export default function ProjectBoard() {
   const { teamId: routeTeamId, projectId } = useParams<{
     teamId?: string;
@@ -157,8 +201,10 @@ export default function ProjectBoard() {
   const [editDueDate, setEditDueDate] = useState<string>("");
   const [editTags, setEditTags] = useState<string>("");
 
-  // Comment input state
+  // Comment input state & @mentions
   const [commentText, setCommentText] = useState("");
+  const [showCommentMentions, setShowCommentMentions] = useState(false);
+  const [commentMentionQuery, setCommentMentionQuery] = useState("");
 
   // Fetch Project Board Details
   const {
@@ -403,6 +449,7 @@ export default function ProjectBoard() {
         old ? old.map((t) => (t._id === updated._id ? updated : t)) : [updated]
       );
       setCommentText("");
+      setShowCommentMentions(false);
       toast.success("Comment posted");
     },
     onError: (err: any) => {
@@ -556,6 +603,36 @@ export default function ProjectBoard() {
       .map((m) => m.user)
       .filter((u): u is TeamMemberUser => !!u);
   }, [team]);
+
+  // Mention filtering for task comments
+  const filteredCommentMembers = useMemo(() => {
+    if (!availableMembers || availableMembers.length === 0) return [];
+    if (!commentMentionQuery) return availableMembers;
+    return availableMembers.filter(
+      (m) =>
+        (m.username || "").toLowerCase().includes(commentMentionQuery) ||
+        (m.name || "").toLowerCase().includes(commentMentionQuery)
+    );
+  }, [availableMembers, commentMentionQuery]);
+
+  const handleCommentTextChange = (val: string) => {
+    setCommentText(val);
+    const match = val.match(/@([a-zA-Z0-9_.-]*)$/);
+    if (match) {
+      setCommentMentionQuery(match[1].toLowerCase());
+      setShowCommentMentions(true);
+    } else {
+      setShowCommentMentions(false);
+    }
+  };
+
+  const handleSelectCommentMention = (user: TeamMemberUser) => {
+    const username =
+      user.username || user.name.replace(/\s+/g, "").toLowerCase();
+    const newText = commentText.replace(/@([a-zA-Z0-9_.-]*)$/, `@${username} `);
+    setCommentText(newText);
+    setShowCommentMentions(false);
+  };
 
   // Permission calculations
   const isTeamOwner = useMemo(() => {
@@ -1693,9 +1770,12 @@ export default function ProjectBoard() {
                             })}
                           </span>
                         </div>
-                        <p className="text-slate-700 text-xs pl-5.5 leading-relaxed">
-                          {comment.text}
-                        </p>
+                        <div className="text-slate-700 text-xs pl-5.5 leading-relaxed">
+                          {renderCommentText(
+                            comment.text,
+                            currentUser?.username || currentUser?.name
+                          )}
+                        </div>
                       </div>
                     );
                   })
@@ -1703,33 +1783,99 @@ export default function ProjectBoard() {
               </div>
 
               {/* Add Comment Input */}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!commentText.trim()) return;
-                  commentMutation.mutate({
-                    taskId: selectedTask._id,
-                    text: commentText.trim(),
-                  });
-                }}
-                className="flex items-center gap-2 pt-1"
-              >
-                <Input
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  placeholder="Write a message or update..."
-                  className="h-9 text-xs rounded-xl bg-slate-50 flex-1"
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={commentMutation.isPending || !commentText.trim()}
-                  className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs h-9 px-3 gap-1 shadow-xs"
+              <div className="relative pt-1">
+                {/* Autocomplete mention popover */}
+                {showCommentMentions && filteredCommentMembers.length > 0 && (
+                  <div className="absolute bottom-full left-0 right-0 mb-1.5 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-30 max-h-48 flex flex-col animate-in fade-in slide-in-from-bottom-1">
+                    <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[11px] text-slate-600 font-semibold select-none">
+                      <span className="flex items-center gap-1 text-blue-600">
+                        <AtSign className="w-3 h-3" />
+                        Mention team member
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        Click to insert
+                      </span>
+                    </div>
+                    <div className="overflow-y-auto p-1 space-y-0.5 max-h-36 scrollbar-thin">
+                      {filteredCommentMembers.map((member) => {
+                        const mInitial = (member.name || "U")[0].toUpperCase();
+                        return (
+                          <button
+                            key={member._id}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              handleSelectCommentMention(member);
+                            }}
+                            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left hover:bg-blue-50/70 transition-colors group"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+                                {mInitial}
+                              </div>
+                              <div className="truncate">
+                                <span className="text-xs font-semibold text-slate-800 mr-1.5">
+                                  {member.name}
+                                </span>
+                                <span className="text-[11px] text-blue-600 font-mono">
+                                  @{member.username || member.name.replace(/\s+/g, "").toLowerCase()}
+                                </span>
+                              </div>
+                            </div>
+                            <span className="text-[10px] text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                              Select
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!commentText.trim()) return;
+                    commentMutation.mutate({
+                      taskId: selectedTask._id,
+                      text: commentText.trim(),
+                    });
+                  }}
+                  className="flex items-center gap-2"
                 >
-                  <Send className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Send</span>
-                </Button>
-              </form>
+                  <div className="relative flex-1 flex items-center">
+                    <Input
+                      value={commentText}
+                      onChange={(e) => handleCommentTextChange(e.target.value)}
+                      placeholder="Write a message or type @ to mention..."
+                      className="h-9 text-xs rounded-xl bg-slate-50 flex-1 pr-8"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const prefix =
+                          commentText && !commentText.endsWith(" ")
+                            ? commentText + " @"
+                            : commentText + "@";
+                        handleCommentTextChange(prefix);
+                      }}
+                      className="absolute right-2 text-slate-400 hover:text-blue-600 transition-colors p-1"
+                      title="Mention member (@)"
+                    >
+                      <AtSign className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={commentMutation.isPending || !commentText.trim()}
+                    className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs h-9 px-3 gap-1 shadow-xs shrink-0"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Send</span>
+                  </Button>
+                </form>
+              </div>
             </div>
           </div>
         </div>

@@ -18,6 +18,7 @@ import {
   ArrowUpRight,
   CheckCircle2,
   AlertCircle,
+  AtSign,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -92,6 +93,11 @@ function getNotificationIcon(type: NotificationType) {
     case "project_updated":
       return {
         icon: Users,
+        bg: "bg-purple-50 text-purple-600 border-purple-200",
+      };
+    case "chat_mention":
+      return {
+        icon: AtSign,
         bg: "bg-purple-50 text-purple-600 border-purple-200",
       };
     case "action_item":
