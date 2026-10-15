@@ -1,0 +1,130 @@
+name: IntellMeet CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+      - 'CI-CD-Pipline'
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Stage 1: Backend CI (Tests & Syntax Validation)
+  backend-ci:
+    name: Backend CI (Node 20 & Tests)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Backend Dependencies
+        run: npm ci
+
+      - name: Run Backend Syntax & Tests
+        run: npm test
+
+  # Stage 2: Frontend CI (TypeScript & Vite Production Build)
+  frontend-ci:
+    name: Frontend CI (TypeScript & Vite Build)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Verify TypeScript & Build Vite SPA
+        run: npm run build
+        env:
+          VITE_API_URL: "https://intellmeet-api.onrender.com/api"
+
+  # Stage 3: Docker Images Verification (Multi-Stage Build Validation)
+  docker-verification:
+    name: Docker Build Integrity
+    needs: [backend-ci, frontend-ci]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Backend Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: false
+          tags: intellmeet-backend:test
+          load: true
+
+      - name: Build Frontend Docker Image (SPA + Nginx)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: false
+          tags: intellmeet-frontend:test
+          load: true
+
+  # Stage 4: CD Deployment Trigger (Render Backend + Vercel Frontend)
+  # Triggers only on push to main branch after all tests & builds pass
+  deploy:
+    name: Continuous Deployment (Render & Vercel)
+    needs: [docker-verification]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Backend Deployment on Render
+        run: |
+          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "Triggering Render Deploy Hook for Backend..."
+            curl -fsSL -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+            echo "Render deployment successfully triggered!"
+          else
+            echo "ℹRENDER_DEPLOY_HOOK_URL secret not set. Skipping automated Render webhook trigger."
+          fi
+
+      - name: Trigger Frontend Deployment on Vercel
+        run: |
+          if [ -n "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}" ]; then
+            echo "Triggering Vercel Deploy Hook for Frontend..."
+            curl -fsSL -X POST "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}"
+            echo "Vercel deployment successfully triggered!"
+          else
+            echo "ℹVERCEL_DEPLOY_HOOK_URL secret not set. Skipping automated Vercel webhook trigger."
+          fi
