@@ -1,24 +1,20 @@
-# ==============================================================================
 # IntellMeet - Production Docker Compose (Cloud & VPS Deployment)
 # Usage:
 #   docker compose -f docker-compose.prod.yml up --build -d
-# ==============================================================================
 
 version: "3.8"
 
 services:
-  # ----------------------------------------------------------------------------
   # Redis - High-speed caching & Socket.io adapter
-  # ----------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
     container_name: intellmeet-redis-prod
     restart: always
-    command: ["redis-server", "--appendonly", "yes"]
+    command: [ "redis-server", "--appendonly", "yes" ]
     volumes:
       - redis_prod_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -30,9 +26,7 @@ services:
     networks:
       - intellmeet-prod-network
 
-  # ----------------------------------------------------------------------------
   # Backend - Production API Service with resource limits
-  # ----------------------------------------------------------------------------
   backend:
     build:
       context: ./backend
@@ -68,9 +62,7 @@ services:
     networks:
       - intellmeet-prod-network
 
-  # ----------------------------------------------------------------------------
   # Frontend - Production Web Server (Nginx)
-  # ----------------------------------------------------------------------------
   frontend:
     build:
       context: ./frontend
@@ -95,9 +87,7 @@ services:
     networks:
       - intellmeet-prod-network
 
-# ------------------------------------------------------------------------------
 # Volumes & Networks
-# ------------------------------------------------------------------------------
 volumes:
   redis_prod_data:
     name: intellmeet-redis-prod-data
