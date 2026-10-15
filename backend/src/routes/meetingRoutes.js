@@ -169,6 +169,27 @@ router.get("/:id", protect, getMeetingById);
  *         description: Only host can update
  */
 router.put("/:id", protect, updateMeeting);
+
+/**
+ * @swagger
+ * /meetings/{id}/cancel:
+ *   post:
+ *     summary: Cancel a scheduled meeting (host only)
+ *     tags: [Meetings]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Meeting cancelled successfully
+ *       403:
+ *         description: Only host can cancel meeting
+ *       404:
+ *         description: Meeting not found
+ */
 router.post("/:id/cancel", protect, cancelMeeting);
 
 /**
@@ -271,7 +292,37 @@ router.post("/:id/start", protect, startMeeting);
  */
 router.post("/:id/end", protect, endMeeting);
 
-// Upload and save meeting recording
+/**
+ * @swagger
+ * /meetings/{id}/recording:
+ *   post:
+ *     summary: Upload and save meeting recording (host only)
+ *     tags: [Meetings]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [recording]
+ *             properties:
+ *               recording:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Meeting recording uploaded and saved successfully
+ *       400:
+ *         description: No recording file provided
+ *       403:
+ *         description: Only host can upload recording
+ */
 router.post("/:id/recording", protect, uploadRecording.single("recording"), uploadMeetingRecording);
 
 module.exports = router;

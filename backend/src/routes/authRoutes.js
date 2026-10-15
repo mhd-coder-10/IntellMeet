@@ -9,9 +9,9 @@ const { authLimiter } = require("../middleware/rateLimiter.middleware")
 
 /**
  * @swagger
- * /auth/signup:
+ * /auth/send-signup-otp:
  *   post:
- *     summary: Register a new user
+ *     summary: Send 6-digit verification code to email for registration
  *     tags: [Auth]
  *     security: []
  *     requestBody:
@@ -20,7 +20,38 @@ const { authLimiter } = require("../middleware/rateLimiter.middleware")
  *         application/json:
  *           schema:
  *             type: object
- *             required: [name, username, email, password]
+ *             required: [email]
+ *             properties:
+ *               email:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Verification OTP sent to email
+ *       400:
+ *         description: Email is required or invalid
+ *       409:
+ *         description: Email already registered
+ *       429:
+ *         description: Too many requests
+ */
+router.post("/send-signup-otp", authLimiter, authController.sendSignupOtp)
+
+/**
+ * @swagger
+ * /auth/signup:
+ *   post:
+ *     summary: Register a new user with verified email OTP
+ *     tags: [Auth]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name, username, email, password, otp]
  *             properties:
  *               name:
  *                 type: string
@@ -30,17 +61,19 @@ const { authLimiter } = require("../middleware/rateLimiter.middleware")
  *                 type: string
  *               password:
  *                 type: string
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
  *     responses:
  *       201:
  *         description: User registered successfully
  *       400:
- *         description: Missing fields
+ *         description: Missing fields or invalid/expired OTP
  *       409:
- *         description: User already exists
+ *         description: User or username already exists
  *       429:
  *         description: Too many requests
  */
-router.post("/send-signup-otp", authLimiter, authController.sendSignupOtp)
 router.post("/signup", authLimiter, authController.signup)
 
 /**

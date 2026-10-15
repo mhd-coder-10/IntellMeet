@@ -30,11 +30,27 @@ const options = {
       },
       {
         name: "Chat",
-        description: "Real-time chat in meetings"
+        description: "Real-time chat in meetings",
       },
       {
         name: "Notifications",
-        description: "User notifications"
+        description: "User notifications",
+      },
+      {
+        name: "AI",
+        description: "AI transcription, summarization, and action items",
+      },
+      {
+        name: "Teams",
+        description: "Team workspaces, members, and invitations",
+      },
+      {
+        name: "Projects",
+        description: "Project boards under team workspaces",
+      },
+      {
+        name: "Tasks",
+        description: "Kanban task management and assignments",
       },
     ],
     components: {
@@ -43,6 +59,11 @@ const options = {
           type: "http",
           scheme: "bearer",
           bearerFormat: "JWT",
+        },
+        cookieAuth: {
+          type: "apiKey",
+          in: "cookie",
+          name: "accessToken",
         },
       },
     },
