@@ -19,7 +19,7 @@ export default function Register() {
                 </div>
                 <div className="flex flex-col">
                     <span className="text-xl font-bold tracking-tight text-slate-900 leading-tight">
-                        Intelli<span className="text-blue-600">Meet</span>
+                        Intell<span className="text-blue-600">Meet</span>
                     </span>
                     <span className="text-[10px] text-slate-400 font-medium tracking-wide">
                         Enterprise Video Collaboration
@@ -31,7 +31,7 @@ export default function Register() {
                 <CardHeader className="text-center pb-4 pt-6 px-6 sm:px-8 border-b border-slate-100 bg-slate-50/70">
                     <CardTitle className="text-xl font-bold text-slate-900 tracking-tight">Create Account</CardTitle>
                     <CardDescription className="text-xs text-slate-600 mt-1">
-                        Join IntelliMeet to start collaborating with your team
+                        Join IntellMeet to start collaborating with your team
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="p-6 sm:p-8">

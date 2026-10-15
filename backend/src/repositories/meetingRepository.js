@@ -28,6 +28,8 @@ class MeetingRepository extends BaseRepository {
         })
             .populate("host", "name username profilePicture")
             .populate("participants", "name username profilePicture")
+            .populate("workspace", "name description")
+            .populate("project", "name description")
             .sort({ createdAt: -1 })
     }
 
@@ -35,6 +37,8 @@ class MeetingRepository extends BaseRepository {
         return Meeting.findById(id)
             .populate("host", "name username email profilePicture")
             .populate("participants", "name username email profilePicture")
+            .populate("workspace", "name description owner members")
+            .populate("project", "name description")
     }
 
     addParticipant(meetingId, userId) {

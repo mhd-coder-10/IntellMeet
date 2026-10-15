@@ -4,7 +4,7 @@ const options = {
   definition: {
     openapi: "3.0.0",
     info: {
-      title: "IntelliMeet API",
+      title: "IntellMeet API",
       version: "1.0.0",
       description:
         "AI-Powered Enterprise Meeting and Collaboration Platform API",

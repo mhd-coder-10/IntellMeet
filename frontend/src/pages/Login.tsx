@@ -31,7 +31,7 @@ export default function Login() {
                 <CardHeader className="text-center pb-4 pt-6 px-6 sm:px-8 border-b border-slate-100 bg-slate-50/70">
                     <CardTitle className="text-xl font-bold text-slate-900 tracking-tight">Welcome Back</CardTitle>
                     <CardDescription className="text-xs text-slate-600 mt-1">
-                        Sign in to your IntelliMeet workspace account
+                        Sign in to your IntellMeet workspace account
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="p-6 sm:p-8">

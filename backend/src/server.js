@@ -37,6 +37,21 @@ const startServer = async () => {
           console.warn("[DueReminder] Periodic check error:", err.message);
         });
       }, 30 * 60 * 1000);
+
+      // Check and expire unconducted scheduled meetings shortly after boot and periodically
+      const meetingService = require("./services/meetingService");
+      setTimeout(() => {
+        meetingService.checkAndExpireScheduledMeetings(io).catch((err) => {
+          console.warn("[MeetingLifecycle] Initial check error:", err.message);
+        });
+      }, 3000);
+
+      // Periodically scan every 2 minutes for expired meetings
+      setInterval(() => {
+        meetingService.checkAndExpireScheduledMeetings(io).catch((err) => {
+          console.warn("[MeetingLifecycle] Periodic check error:", err.message);
+        });
+      }, 2 * 60 * 1000);
     })
   } catch (error) {
     console.error("\nServer startup error:", error.message)

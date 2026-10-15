@@ -10,6 +10,7 @@ export interface User {
   role: 'admin' | 'member'
   profilePicture?: string
   bio?: string
+  isEmailVerified?: boolean
 }
 
 export interface LoginPayload {
@@ -22,6 +23,7 @@ export interface RegisterPayload {
   username: string
   email: string
   password: string
+  otp: string
 }
 
 export interface AuthResponse {

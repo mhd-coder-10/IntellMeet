@@ -1,8 +1,9 @@
 // Enterprise Meeting Card component
-// Displays meeting details, status badges, quick code copy, host badges, and lifecycle actions
+// Displays meeting status (Upcoming / Live / Completed), workspace & project badges,
+// real-time countdown, conditional join button, and lifecycle actions without meeting codes
 
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
   Calendar,
@@ -11,9 +12,10 @@ import {
   Trash2,
   X,
   Loader2,
-  Copy,
   Info,
   Clock,
+  Briefcase,
+  Layers,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,55 +30,51 @@ interface Props {
   meeting: Meeting;
 }
 
-const statusStyles = {
-  scheduled: {
-    badge: "bg-blue-50 text-blue-700 border border-blue-200",
-    dot: "bg-blue-600",
-    label: "Scheduled",
-  },
-  ongoing: {
-    badge: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-    dot: "bg-emerald-500 animate-ping",
-    label: "Live Now",
-  },
-  completed: {
-    badge: "bg-slate-100 text-slate-600 border border-slate-200",
-    dot: "bg-slate-400",
-    label: "Completed",
-  },
-  cancelled: {
-    badge: "bg-red-50 text-red-700 border border-red-200",
-    dot: "bg-red-500",
-    label: "Cancelled",
-  },
+// Calculate countdown string (e.g. "Starts in 2h 15m")
+const getCountdownText = (targetMs: number, currentMs: number) => {
+  const diff = targetMs - currentMs;
+  if (diff <= 0) return "Starting now";
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  if (hours > 24) {
+    const days = Math.floor(hours / 24);
+    return `Starts in ${days}d ${hours % 24}h`;
+  }
+  if (hours > 0) {
+    return `Starts in ${hours}h ${minutes}m`;
+  }
+  return `Starts in ${Math.max(1, minutes)}m`;
 };
 
 export function MeetingCard({ meeting }: Props) {
+  const [now, setNow] = useState(Date.now());
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isHideConfirmOpen, setIsHideConfirmOpen] = useState(false);
   const queryClient = useQueryClient();
   const currentUser = useAuthStore((state) => state.user);
 
-  const isHost = meeting.host._id === currentUser?.id;
+  // Auto-tick every 10 seconds so Join button enables automatically when time arrives
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 10000);
+    return () => clearInterval(timer);
+  }, []);
 
-  // Delete only for host on completed/cancelled meetings
-  const canDelete =
-    isHost && (meeting.status === "completed" || meeting.status === "cancelled");
+  const isHost = meeting.host?._id === currentUser?.id;
+  const startMs = new Date(meeting.startTime || meeting.scheduledAt).getTime();
+  const isFuture = now < startMs;
+  const isCancelled = meeting.status === "cancelled";
+  const isExpired = meeting.status === "expired";
+  const isCompleted = (meeting.status === "completed" || (Boolean(meeting.endedAt) && !isCancelled && !isExpired)) && !isCancelled && !isExpired;
+  const isLive = !isCompleted && !isCancelled && !isExpired && !isFuture;
 
-  // Join only for active meetings
-  const canJoin =
-    meeting.status !== "completed" && meeting.status !== "cancelled";
+  // Delete only for host on completed/cancelled/expired meetings
+  const canDelete = isHost && (isCompleted || isCancelled || isExpired);
 
-  // Hide option only for non-host users
-  const canHide = !isHost;
+  // Hide/Remove option only for non-host users on completed/cancelled/expired meetings
+  const canHide = !isHost && (isCompleted || isCancelled || isExpired);
 
   const participantCount = (meeting.participants?.length || 0) + 1;
-
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(meeting.meetingCode);
-    toast.success(`Code ${meeting.meetingCode} copied!`);
-  };
 
   const confirmDelete = async () => {
     setIsLoading(true);
@@ -106,27 +104,43 @@ export function MeetingCard({ meeting }: Props) {
     }
   };
 
-  const currentStatus = statusStyles[meeting.status] || statusStyles.scheduled;
+  const formattedStartTime = new Date(meeting.startTime || meeting.scheduledAt).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   return (
     <Card className="border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-md transition-all duration-200 rounded-2xl shadow-xs overflow-hidden flex flex-col justify-between">
       <CardHeader className="p-5 pb-3 space-y-2">
         <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
+          <div className="space-y-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
               <CardTitle className="text-base font-bold text-slate-900 tracking-tight line-clamp-1">
                 {meeting.title}
               </CardTitle>
               {isHost ? (
-                <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-amber-50 text-amber-700 border border-amber-200 shrink-0">
                   Host
                 </span>
+              ) : isCompleted ? (
+                meeting.wasAttended ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Present
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-slate-100 text-slate-600 border border-slate-200 shrink-0 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                    Absent
+                  </span>
+                )
               ) : (
-                <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                  Member
+                <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
+                  Invited
                 </span>
               )}
             </div>
+
             {meeting.description && (
               <p className="text-xs text-slate-500 line-clamp-2">
                 {meeting.description}
@@ -134,13 +148,49 @@ export function MeetingCard({ meeting }: Props) {
             )}
           </div>
 
-          {/* Status Badge */}
-          <span
-            className={`text-[11px] font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1.5 shrink-0 ${currentStatus.badge}`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${currentStatus.dot}`} />
-            {currentStatus.label}
-          </span>
+          {/* Status States Badge */}
+          {isCancelled ? (
+            <span className="text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1.5 shrink-0 bg-rose-50 text-rose-700 border border-rose-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+              Cancelled
+            </span>
+          ) : isExpired ? (
+            <span className="text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1.5 shrink-0 bg-amber-50 text-amber-700 border border-amber-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              Expired
+            </span>
+          ) : isCompleted ? (
+            <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1.5 shrink-0 bg-slate-100 text-slate-600 border border-slate-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+              Completed
+            </span>
+          ) : isLive ? (
+            <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1.5 shrink-0 bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              LIVE NOW
+            </span>
+          ) : (
+            <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1.5 shrink-0 bg-blue-50 text-blue-700 border border-blue-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+              Upcoming
+            </span>
+          )}
+        </div>
+
+        {/* Workspace & Project tags */}
+        <div className="flex items-center gap-2 flex-wrap pt-1">
+          {meeting.workspace && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-indigo-50/80 text-indigo-700 border border-indigo-100">
+              <Briefcase className="w-3 h-3 text-indigo-500" />
+              {meeting.workspace.name}
+            </span>
+          )}
+          {meeting.project && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-purple-50/80 text-purple-700 border border-purple-100">
+              <Layers className="w-3 h-3 text-purple-500" />
+              {meeting.project.name}
+            </span>
+          )}
         </div>
       </CardHeader>
 
@@ -149,7 +199,7 @@ export function MeetingCard({ meeting }: Props) {
         <div className="grid grid-cols-2 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-xs">
           <div className="flex items-center gap-2 text-slate-700">
             <Users className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-            <span className="truncate">{participantCount} {participantCount === 1 ? "member" : "members"}</span>
+            <span className="truncate">{participantCount} {participantCount === 1 ? "participant" : "participants"}</span>
           </div>
 
           <div className="flex items-center gap-2 text-slate-700">
@@ -162,65 +212,70 @@ export function MeetingCard({ meeting }: Props) {
             </span>
           </div>
 
-          {/* Schedule Time Window (Start Time — End Time or Open-ended) */}
+          {/* Schedule Time Window */}
           <div className="flex items-center gap-2 text-slate-700 col-span-2 pt-1 border-t border-slate-200/70">
             <Clock className="h-3.5 w-3.5 text-blue-600 shrink-0" />
             <span className="text-[11px] text-slate-600 truncate font-medium">
-              {new Date(meeting.startTime || meeting.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {formattedStartTime}
               {" — "}
-              {meeting.endTime ? new Date(meeting.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Open-ended"}
+              {meeting.endTime ? new Date(meeting.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Open-ended"}
             </span>
           </div>
 
-          <div className="flex items-center gap-2 text-slate-700 col-span-2 pt-1 border-t border-slate-200/70 justify-between">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-slate-500">Code:</span>
-              <span className="font-mono font-bold text-slate-900 text-xs">
-                {meeting.meetingCode}
-              </span>
+          {/* Status Hint / Countdown Banner */}
+          {isCancelled ? (
+            <div className="col-span-2 pt-1.5 border-t border-rose-200/70 flex items-center justify-between text-[11px] text-rose-700 font-semibold bg-rose-50/70 -mx-3 -mb-3 px-3 py-1.5 rounded-b-xl">
+              <span>Cancelled by host</span>
             </div>
-            <button
-              onClick={handleCopyCode}
-              className="text-slate-600 hover:text-slate-900 flex items-center gap-1 text-[11px] bg-white hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 transition cursor-pointer"
-              title="Copy code"
-            >
-              <Copy className="w-3 h-3" />
-              Copy
-            </button>
-          </div>
+          ) : isExpired ? (
+            <div className="col-span-2 pt-1.5 border-t border-amber-200/70 flex items-center justify-between text-[11px] text-amber-700 font-semibold bg-amber-50/70 -mx-3 -mb-3 px-3 py-1.5 rounded-b-xl">
+              <span>Not conducted (Expired)</span>
+            </div>
+          ) : !isCompleted && isFuture ? (
+            <div className="col-span-2 pt-1.5 border-t border-slate-200/70 flex items-center justify-between text-[11px] text-blue-700 font-semibold bg-blue-50/50 -mx-3 -mb-3 px-3 py-1.5 rounded-b-xl">
+              <span>Starts at {formattedStartTime}</span>
+              <span className="text-blue-600 font-medium">{getCountdownText(startMs, now)}</span>
+            </div>
+          ) : null}
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2 pt-1">
-          {/* Details Button - always available */}
-          <Link to={`/meetings/${meeting._id}/details`} className={canJoin ? "" : "flex-1"}>
+        <div className="flex items-center gap-2 pt-1 w-full min-w-0">
+          {/* Details / Summary Button */}
+          <Link to={`/meetings/${meeting._id}/details`} className="flex-1 min-w-0">
             <Button
               variant="outline"
               size="sm"
-              className="w-full h-9 rounded-xl text-xs border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900"
+              className="w-full h-9 rounded-xl text-xs border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 px-2.5 flex items-center justify-center min-w-0"
             >
-              <Info className="h-3.5 w-3.5 mr-1 text-blue-600" />
-              Details
+              <Info className="h-3.5 w-3.5 mr-1 text-blue-600 shrink-0" />
+              <span className="truncate">{isCompleted ? "Summary & Recording" : "Details"}</span>
             </Button>
           </Link>
 
-          {canJoin && (
-            <Link to={`/meetings/${meeting._id}`} className="flex-1">
-              <Button
-                className={`w-full ${
-                  meeting.status === "ongoing"
-                    ? "bg-emerald-600 hover:bg-emerald-700 shadow-xs"
-                    : "bg-blue-600 hover:bg-blue-700 shadow-xs"
-                } text-white font-medium rounded-xl text-xs h-9`}
-              >
-                <Video className="h-3.5 w-3.5 mr-1.5" />
-                {meeting.status === "ongoing"
-                  ? "Join Call"
-                  : isHost
-                  ? "Start Meeting"
-                  : "Join"}
-              </Button>
-            </Link>
+          {/* Conditional Join Button */}
+          {!isCompleted && !isCancelled && !isExpired && (
+            <div className="flex-1 min-w-0">
+              {isLive ? (
+                <Link to={`/meetings/${meeting._id}`} className="w-full block">
+                  <Button
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-xs h-9 shadow-xs cursor-pointer px-2.5 flex items-center justify-center min-w-0"
+                  >
+                    <Video className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                    <span className="truncate">Join Call (Live)</span>
+                  </Button>
+                </Link>
+              ) : (
+                <Button
+                  disabled
+                  title={`Meeting starts at ${formattedStartTime}`}
+                  className="w-full bg-slate-100 text-slate-400 border border-slate-200 font-medium rounded-xl text-xs h-9 cursor-not-allowed opacity-80 px-2.5 flex items-center justify-center min-w-0"
+                >
+                  <Clock className="h-3.5 w-3.5 mr-1 text-slate-400 shrink-0" />
+                  <span className="truncate">{getCountdownText(startMs, now)}</span>
+                </Button>
+              )}
+            </div>
           )}
 
           {canDelete && (
@@ -229,32 +284,31 @@ export function MeetingCard({ meeting }: Props) {
               size="sm"
               onClick={() => setIsDeleteConfirmOpen(true)}
               disabled={isLoading}
-              className="flex-1 h-9 rounded-xl text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200"
+              className="h-9 px-3 rounded-xl text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 cursor-pointer shrink-0 flex items-center justify-center"
             >
               {isLoading ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin mr-1 shrink-0" />
               ) : (
-                <Trash2 className="w-3.5 h-3.5 mr-1" />
+                <Trash2 className="w-3.5 h-3.5 mr-1 shrink-0" />
               )}
-              Delete
+              <span>Delete</span>
             </Button>
           )}
 
           {canHide && (
             <Button
               variant="outline"
+              size="sm"
               onClick={() => setIsHideConfirmOpen(true)}
               disabled={isLoading}
-              className="flex-1 h-9 rounded-xl text-xs border-red-200 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700"
+              className="h-9 px-3 rounded-xl text-xs border-red-200 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 cursor-pointer shrink-0 flex items-center justify-center"
             >
               {isLoading ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
               ) : (
-                <>
-                  <X className="h-3.5 w-3.5 mr-1" />
-                  Remove
-                </>
+                <X className="w-3.5 h-3.5 mr-1 shrink-0" />
               )}
+              <span>Remove</span>
             </Button>
           )}
         </div>

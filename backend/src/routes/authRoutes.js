@@ -40,6 +40,7 @@ const { authLimiter } = require("../middleware/rateLimiter.middleware")
  *       429:
  *         description: Too many requests
  */
+router.post("/send-signup-otp", authLimiter, authController.sendSignupOtp)
 router.post("/signup", authLimiter, authController.signup)
 
 /**

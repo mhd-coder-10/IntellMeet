@@ -31,3 +31,7 @@ Thumbs.db
 # Temporary Files
 *.tmp
 *.temp
+
+# Uploads
+backend/uploads/
+

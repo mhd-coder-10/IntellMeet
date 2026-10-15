@@ -2,7 +2,7 @@
 // Uses centralized axios instance with JWT interceptor
 
 import api from './api'
-import type { Meeting, CreateMeetingPayload } from '@/types/meeting'
+import type { Meeting, CreateMeetingPayload, UpdateMeetingPayload, MeetingAnalytics } from '@/types/meeting'
 
 export const createMeeting = async (payload: CreateMeetingPayload): Promise<Meeting> => {
     const response = await api.post('/meetings', payload)
@@ -14,17 +14,24 @@ export const getMyMeetings = async (): Promise<Meeting[]> => {
     return response.data.data.meetings
 }
 
+export const getMeetingAnalytics = async (): Promise<MeetingAnalytics> => {
+    const response = await api.get('/meetings/analytics')
+    return response.data.data
+}
+
+export const getProjectMembers = async (
+    projectId: string
+): Promise<{ _id: string; name: string; username: string; email: string; profilePicture?: string }[]> => {
+    const response = await api.get(`/projects/${projectId}/members`)
+    return response.data.data
+}
+
 export const hideMeeting = async (id: string): Promise<void> => {
     await api.delete(`/meetings/${id}/hide`)
 }
 
 export const getMeetingById = async (id: string): Promise<Meeting> => {
     const response = await api.get(`/meetings/${id}`)
-    return response.data.data.meeting
-}
-
-export const getMeetingByCode = async (code: string): Promise<Meeting> => {
-    const response = await api.get(`/meetings/code/${code}`)
     return response.data.data.meeting
 }
 
@@ -49,15 +56,14 @@ export const endMeeting = async (id: string): Promise<Meeting> => {
 
 export const updateMeeting = async (
     id: string,
-    payload: {
-        title?: string;
-        description?: string;
-        scheduledAt?: string;
-        startTime?: string;
-        settings?: any;
-    }
+    payload: UpdateMeetingPayload
 ): Promise<Meeting> => {
     const response = await api.put(`/meetings/${id}`, payload)
+    return response.data.data.meeting
+}
+
+export const cancelMeeting = async (id: string): Promise<Meeting> => {
+    const response = await api.post(`/meetings/${id}/cancel`)
     return response.data.data.meeting
 }
 

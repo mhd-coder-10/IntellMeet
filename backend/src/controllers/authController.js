@@ -31,6 +31,23 @@ const clearAuthCookies = (res) => {
   res.clearCookie("refreshToken", clearOpts);
 };
 
+// Handle send signup OTP request
+const sendSignupOtp = async (req, res) => {
+  try {
+    const data = await authService.sendSignupOtp(req.body);
+    res.status(200).json({
+      success: true,
+      message: data.message || "Verification code sent to your email",
+      data,
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 // Handle signup request
 const signup = async (req, res) => {
   try {
@@ -120,4 +137,4 @@ const getMe = async (req, res) => {
   }
 };
 
-module.exports = {  authController: {signup, login, refresh, logout, getMe} };
+module.exports = {  authController: {sendSignupOtp, signup, login, refresh, logout, getMe} };

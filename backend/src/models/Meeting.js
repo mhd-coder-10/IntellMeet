@@ -27,12 +27,17 @@ const meetingSchema = new mongoose.Schema(
                 ref: "User",
             },
         ],
-        meetingCode: {
-            type: String,
-            required: true,
-            unique: true,
-            uppercase: true,
-            trim: true,
+        workspace: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Team",
+            default: null,
+            index: true,
+        },
+        project: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Project",
+            default: null,
+            index: true,
         },
         password: {
             type: String,
@@ -61,7 +66,7 @@ const meetingSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["scheduled", "ongoing", "completed", "cancelled"],
+            enum: ["scheduled", "ongoing", "completed", "cancelled", "expired"],
             default: "scheduled",
         },
         isRecording: {

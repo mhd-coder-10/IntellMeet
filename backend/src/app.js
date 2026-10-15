@@ -51,7 +51,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     status: 'OK',
-    message: 'IntelliMeet API is running',
+    message: 'IntellMeet API is running',
     timestamp: new Date().toISOString(),
   })
 });

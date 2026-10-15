@@ -49,10 +49,16 @@ const notifyParticipants = async (meeting, hostId, type, title, message) => {
 }
 
 const createMeeting = async (userId, data) => {
-  const { title, description, scheduledAt, startTime, endTime, settings } = data;
+  const { title, description, scheduledAt, startTime, endTime, settings, workspace, project, participants } = data;
 
-  if (!title) {
+  if (!title || !title.trim()) {
     const error = new Error("Meeting title is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!workspace) {
+    const error = new Error("Workspace selection is mandatory");
     error.statusCode = 400;
     throw error;
   }
@@ -64,30 +70,113 @@ const createMeeting = async (userId, data) => {
     throw error;
   }
 
-  let meetingCode = generateMeetingCode();
-  let existing = await meetingRepo.findByCode(meetingCode);
-  while (existing) {
-    meetingCode = generateMeetingCode();
-    existing = await meetingRepo.findByCode(meetingCode);
+  // Validate workspace
+  const Team = require("../models/Team");
+  const team = await Team.findById(workspace);
+  if (!team) {
+    const error = new Error("Selected workspace does not exist");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // Verify caller is a member/owner of the workspace
+  const isOwner = team.owner.toString() === userId.toString();
+  const isMember = (team.members || []).some(
+    (m) => (m.user?._id || m.user)?.toString() === userId.toString() && (m.status === "active" || !m.status)
+  );
+  if (!isOwner && !isMember) {
+    const error = new Error("You must be a member of this workspace to schedule meetings");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  // Validate project if provided
+  let projectDoc = null;
+  if (project) {
+    const Project = require("../models/Project");
+    projectDoc = await Project.findById(project);
+    if (!projectDoc || projectDoc.team.toString() !== team._id.toString()) {
+      const error = new Error("Selected project does not belong to this workspace");
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  // Validate participants (must have at least 1 participant besides host)
+  const participantIds = Array.isArray(participants)
+    ? [...new Set(participants.map((p) => (p?._id || p).toString()).filter((id) => id !== userId.toString()))]
+    : [];
+
+  if (participantIds.length === 0) {
+    const error = new Error("Please select at least 1 participant for the meeting");
+    error.statusCode = 400;
+    throw error;
   }
 
   const meetingStartTime = startTime ? new Date(startTime) : (scheduledAt ? new Date(scheduledAt) : new Date());
   const meetingEndTime = endTime ? new Date(endTime) : null;
 
+  // Past time validation (allow 2-minute buffer for network transit)
+  const pastGraceBufferMs = 2 * 60 * 1000;
+  if (meetingStartTime.getTime() < Date.now() - pastGraceBufferMs) {
+    const error = new Error("Meeting start time cannot be in the past. Please select a future time.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (meetingEndTime && meetingEndTime.getTime() <= meetingStartTime.getTime()) {
+    const error = new Error("Meeting end time must be later than start time");
+    error.statusCode = 400;
+    throw error;
+  }
+
   const meeting = await meetingRepo.create({
-    title,
-    description: description || "",
+    title: title.trim(),
+    description: (description || "").trim(),
     host: userId,
-    meetingCode,
+    workspace: team._id,
+    project: projectDoc ? projectDoc._id : null,
+    participants: participantIds,
     scheduledAt: meetingStartTime,
     startTime: meetingStartTime,
     endTime: meetingEndTime,
     settings: settings || {},
+    status: "scheduled",
   });
 
-  await deleteCacheByPattern(`user:${userId}:meetings`);
+  const populatedMeeting = await meetingRepo.findByIdPopulated(meeting._id);
 
-  return { meeting };
+  await deleteCacheByPattern(`user:${userId}:meetings`);
+  await clearMeetingCaches(meeting._id, userId);
+
+  // Send Email Notifications & In-app notifications to all invited participants
+  const emailService = require("./emailService");
+  const User = require("../models/User");
+  const participantUsers = await User.find({ _id: { $in: participantIds } });
+
+  for (const pUser of participantUsers) {
+    // 1. In-app notification
+    notificationService.createNotification({
+      recipient: pUser._id,
+      sender: userId,
+      type: "meeting_invited",
+      title: "Meeting Invitation",
+      message: `You have been invited to "${meeting.title}" by ${host.name}`,
+      link: `/meetings/${meeting._id}/details`,
+    }).catch((e) => console.warn("In-app notification error:", e.message));
+
+    // 2. Email invite dispatch
+    emailService.sendMeetingInviteEmail({
+      recipientEmail: pUser.email,
+      recipientName: pUser.name,
+      meeting: populatedMeeting || meeting,
+      hostName: host.name,
+      workspaceName: team.name,
+      projectName: projectDoc?.name || null,
+    }).catch((e) => console.warn("Email invite dispatch error:", e.message));
+  }
+
+  return { meeting: populatedMeeting || meeting };
 };
 
 const getMeetingById = async (meetingId, userId = null) => {
@@ -123,6 +212,22 @@ const getMeetingById = async (meetingId, userId = null) => {
       cached.meeting.recordingStartedAt = isRecordingActive ? roomRecordingStartedAt : null;
       cached.meeting.recordingUserId = roomRecordingUser || null;
     }
+    if (cached.meeting && cached.meeting.status === "scheduled" && !cached.meeting.startedAt) {
+      const start = new Date(cached.meeting.startTime || cached.meeting.scheduledAt || cached.meeting.createdAt).getTime();
+      let expiryThresholdMs;
+      if (cached.meeting.endTime) {
+        const end = new Date(cached.meeting.endTime).getTime();
+        expiryThresholdMs = Math.max(end + 15 * 60 * 1000, start + 60 * 60 * 1000);
+      } else {
+        expiryThresholdMs = start + 60 * 60 * 1000;
+      }
+      if (Date.now() > expiryThresholdMs) {
+        cached.meeting.status = "expired";
+        await meetingRepo.updateById(cached.meeting._id, { status: "expired" });
+        const hostId = (cached.meeting.host?._id || cached.meeting.host)?.toString();
+        await clearMeetingCaches(cached.meeting._id, hostId);
+      }
+    }
     return cached;
   }
 
@@ -131,6 +236,25 @@ const getMeetingById = async (meetingId, userId = null) => {
     const error = new Error("Meeting not found")
     error.statusCode = 404
     throw error
+  }
+
+  // Check if unconducted scheduled meeting has expired
+  if (meeting.status === "scheduled" && !meeting.startedAt) {
+    const start = new Date(meeting.startTime || meeting.scheduledAt || meeting.createdAt).getTime();
+    let expiryThresholdMs;
+    if (meeting.endTime) {
+      const end = new Date(meeting.endTime).getTime();
+      expiryThresholdMs = Math.max(end + 15 * 60 * 1000, start + 60 * 60 * 1000);
+    } else {
+      expiryThresholdMs = start + 60 * 60 * 1000;
+    }
+
+    if (Date.now() > expiryThresholdMs) {
+      meeting.status = "expired";
+      await meetingRepo.updateById(meeting._id, { status: "expired" });
+      const hostId = (meeting.host?._id || meeting.host)?.toString();
+      await clearMeetingCaches(meeting._id, hostId);
+    }
   }
 
   // Ensure all users who attended or joined this meeting are present in meeting.participants
@@ -190,11 +314,12 @@ const getMeetingById = async (meetingId, userId = null) => {
   meetingObj.isRecording = isRecordingActive;
   meetingObj.recordingStartedAt = isRecordingActive ? roomRecordingStartedAt : null;
   meetingObj.recordingUserId = roomRecordingUser || null;
+  meetingObj.attendedUserIds = (attendedUsers || []).map((u) => u._id.toString());
 
   const result = { meeting: meetingObj };
   await setCache(cacheKey, result, 300);
   return result;
-}
+};
 
 const getMeetingByCode = async (code) => {
   const meeting = await meetingRepo.findByCode(code)
@@ -206,7 +331,112 @@ const getMeetingByCode = async (code) => {
   return { meeting }
 }
 
+/**
+ * Automatically transitions unconducted scheduled meetings to 'expired'.
+ * Criteria:
+ * 1. status is 'scheduled'
+ * 2. startedAt is null (never started)
+ * 3. Scheduled time has passed:
+ *    - If endTime is set: now > endTime + 15 minutes (with minimum 60 mins from start)
+ *    - If endTime is null/undefined: now > startTime + 60 minutes
+ */
+const checkAndExpireScheduledMeetings = async (io = null) => {
+  try {
+    const Meeting = require("../models/Meeting");
+    const now = new Date();
+    const nowMs = now.getTime();
+
+    // Find candidate scheduled meetings that never started
+    const candidates = await Meeting.find({
+      status: "scheduled",
+      startedAt: null,
+    });
+
+    const expiredMeetingIds = [];
+
+    for (const meeting of candidates) {
+      const start = new Date(meeting.startTime || meeting.scheduledAt || meeting.createdAt).getTime();
+      let expiryThresholdMs;
+
+      if (meeting.endTime) {
+        const end = new Date(meeting.endTime).getTime();
+        // 15 minutes grace after scheduled endTime, with minimum 60 mins from startTime
+        expiryThresholdMs = Math.max(end + 15 * 60 * 1000, start + 60 * 60 * 1000);
+      } else {
+        // Open-ended: expires 60 minutes after scheduled start time if no one joins
+        expiryThresholdMs = start + 60 * 60 * 1000;
+      }
+
+      if (nowMs > expiryThresholdMs) {
+        meeting.status = "expired";
+        await meeting.save();
+        expiredMeetingIds.push(meeting._id.toString());
+
+        const hostId = (meeting.host?._id || meeting.host)?.toString();
+        await clearMeetingCaches(meeting._id, hostId);
+
+        if (io) {
+          io.to(meeting._id.toString()).emit("meeting:updated", {
+            meetingId: meeting._id,
+            status: "expired",
+          });
+          io.emit("meeting:expired", {
+            meetingId: meeting._id,
+            status: "expired",
+          });
+        }
+
+        // Notify participants and host about meeting expiration
+        try {
+          const emailService = require("./emailService");
+          const User = require("../models/User");
+          const Team = require("../models/Team");
+          const host = await User.findById(hostId);
+          const workspace = meeting.workspace ? await Team.findById(meeting.workspace) : null;
+          const hostName = host?.name || "The host";
+          const pIds = (meeting.participants || []).map((p) => (p._id || p).toString());
+          const allNotifyIds = [...new Set([...pIds, hostId])].filter(Boolean);
+          const notifyUsers = await User.find({ _id: { $in: allNotifyIds } });
+
+          for (const u of notifyUsers) {
+            notificationService.createNotification({
+              recipient: u._id,
+              sender: hostId,
+              type: "system",
+              title: "Meeting Expired",
+              message: `Meeting "${meeting.title}" expired as it was not started by the scheduled time.`,
+              link: `/dashboard`,
+            }).catch((e) => console.warn("Expired in-app alert error:", e.message));
+
+            emailService.sendMeetingExpiredEmail({
+              recipientEmail: u.email,
+              recipientName: u.name,
+              meeting,
+              hostName,
+              workspaceName: workspace?.name,
+            }).catch((e) => console.warn("Expired email dispatch error:", e.message));
+          }
+        } catch (expNotifyErr) {
+          console.warn("Expired notification error:", expNotifyErr.message);
+        }
+      }
+    }
+
+    if (expiredMeetingIds.length > 0) {
+      console.log(`[Meeting Lifecycle] Auto-expired ${expiredMeetingIds.length} unconducted meetings:`, expiredMeetingIds);
+    }
+
+    return expiredMeetingIds;
+  } catch (err) {
+    console.error("[Meeting Lifecycle] Error in checkAndExpireScheduledMeetings:", err.message);
+    return [];
+  }
+};
+
 const getUserMeetings = async (userId) => {
+  // Ensure unconducted past meetings are lazily auto-expired
+  await checkAndExpireScheduledMeetings();
+
   const Meeting = require("../models/Meeting");
   const user = await userRepo.findById(userId);
   if (!user) {
@@ -225,7 +455,7 @@ const getUserMeetings = async (userId) => {
   // Filter: completed ones always visible, active ones only within 10 min
   const visibleAttendedIds = attendedMeetings
     .filter((m) => {
-      if (m.status === "completed" || m.status === "cancelled") return true;
+      if (m.status === "completed" || m.status === "cancelled" || m.status === "expired") return true;
 
       const record = user.attendedMeetings.find(
         (a) => a.meeting.toString() === m._id.toString()
@@ -259,100 +489,243 @@ const getUserMeetings = async (userId) => {
   })
     .populate("host", "name username profilePicture")
     .populate("participants", "name username profilePicture")
-    .sort({ createdAt: -1 });
+    .populate("workspace", "name description color code")
+    .populate("project", "name description color")
+    .sort({ startTime: 1, createdAt: -1 });
 
-  return { meetings };
+  const attendedSet = new Set(
+    (user.attendedMeetings || []).map((a) => (a.meeting?._id || a.meeting).toString())
+  );
+
+  const formattedMeetings = meetings.map((m) => {
+    const obj = m.toObject ? m.toObject() : m;
+    obj.wasAttended = attendedSet.has(m._id.toString());
+    return obj;
+  });
+
+  return { meetings: formattedMeetings };
 };
 
 const updateMeeting = async (meetingId, userId, updateData) => {
-  const meeting = await meetingRepo.findById(meetingId)
+  const meeting = await meetingRepo.findById(meetingId);
   if (!meeting) {
-    const error = new Error("Meeting not found")
-    error.statusCode = 404
-    throw error
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
   }
 
   if (meeting.host.toString() !== userId.toString()) {
-    const error = new Error("Only host can update the meeting")
-    error.statusCode = 403
-    throw error
+    const error = new Error("Only host can update the meeting");
+    error.statusCode = 403;
+    throw error;
   }
 
-  if (meeting.status === "completed" || meeting.status === "ended") {
-    const error = new Error("Completed meetings cannot be edited")
-    error.statusCode = 400
-    throw error
+  if (meeting.status === "completed" || meeting.status === "ended" || meeting.status === "cancelled" || meeting.status === "expired") {
+    const error = new Error("This meeting cannot be edited as it is already completed, cancelled, or expired");
+    error.statusCode = 400;
+    throw error;
   }
 
-  const allowedFields = ["title", "description", "scheduledAt", "startTime", "settings"]
-  const updates = {}
+  const previousParticipantIds = (meeting.participants || []).map((p) => (p._id || p).toString());
+
+  const allowedFields = [
+    "title",
+    "description",
+    "scheduledAt",
+    "startTime",
+    "endTime",
+    "workspace",
+    "project",
+    "participants",
+    "settings",
+  ];
+  const updates = {};
 
   allowedFields.forEach((field) => {
     if (updateData[field] !== undefined) {
-      updates[field] = updateData[field]
+      updates[field] = updateData[field];
     }
-  })
+  });
 
-  // Synchronize scheduledAt and startTime for scheduled meetings
-  if (updateData.scheduledAt) {
-    const parsedDate = new Date(updateData.scheduledAt);
-    updates.scheduledAt = parsedDate;
-    if (meeting.status === "scheduled" || !meeting.startedAt) {
-      updates.startTime = parsedDate;
-    }
-  } else if (updateData.startTime) {
+  if (updateData.title) updates.title = updateData.title.trim();
+  if (updateData.description !== undefined) updates.description = updateData.description.trim();
+
+  // Synchronize scheduledAt and startTime
+  if (updateData.startTime) {
     const parsedDate = new Date(updateData.startTime);
     updates.startTime = parsedDate;
-    if (meeting.status === "scheduled" || !meeting.startedAt) {
-      updates.scheduledAt = parsedDate;
+    updates.scheduledAt = parsedDate;
+  } else if (updateData.scheduledAt) {
+    const parsedDate = new Date(updateData.scheduledAt);
+    updates.startTime = parsedDate;
+    updates.scheduledAt = parsedDate;
+  }
+
+  if (updateData.endTime !== undefined) {
+    updates.endTime = updateData.endTime ? new Date(updateData.endTime) : null;
+  }
+
+  if (updateData.participants && Array.isArray(updateData.participants)) {
+    updates.participants = [
+      ...new Set(
+        updateData.participants
+          .map((p) => (p?._id || p).toString())
+          .filter((id) => id !== userId.toString())
+      ),
+    ];
+  }
+
+  if (updateData.workspace) {
+    updates.workspace = updateData.workspace;
+  }
+  if (updateData.project !== undefined) {
+    updates.project = updateData.project || null;
+  }
+
+  // Validate start time is not in the past if updated
+  if (updates.startTime) {
+    const pastGraceBufferMs = 2 * 60 * 1000;
+    if (updates.startTime.getTime() < Date.now() - pastGraceBufferMs) {
+      const error = new Error("Meeting start time cannot be in the past. Please select a future time.");
+      error.statusCode = 400;
+      throw error;
     }
   }
 
-  const updated = await meetingRepo.updateById(meetingId, updates)
-  const populated = await meetingRepo.findByIdPopulated(meetingId)
+  const effectiveStart = updates.startTime || meeting.startTime;
+  const effectiveEnd = updates.endTime !== undefined ? updates.endTime : meeting.endTime;
+  if (effectiveEnd && effectiveStart && effectiveEnd.getTime() <= effectiveStart.getTime()) {
+    const error = new Error("Meeting end time must be later than start time");
+    error.statusCode = 400;
+    throw error;
+  }
 
-  await clearMeetingCaches(meetingId, userId)
+  await meetingRepo.updateById(meetingId, updates);
+  const populated = await meetingRepo.findByIdPopulated(meetingId);
 
-  // Notify participants of meeting updates
-  if (populated && Array.isArray(populated.participants)) {
+  await clearMeetingCaches(meetingId, userId);
+
+  // Notify participants of meeting updates (union of previous and current participants)
+  const currentParticipantIds = (populated.participants || []).map((p) => (p._id || p).toString());
+  const allParticipantIds = [
+    ...new Set([...previousParticipantIds, ...currentParticipantIds]),
+  ].filter((id) => id !== userId.toString());
+
+  if (allParticipantIds.length > 0) {
     try {
       const User = require("../models/User");
+      const emailService = require("./emailService");
       const host = await User.findById(userId);
       const hostName = host?.name || "The host";
+      const usersToNotify = await User.find({ _id: { $in: allParticipantIds } });
 
-      for (const p of populated.participants) {
-        const pId = p.user?._id ? p.user._id.toString() : p.user ? p.user.toString() : null;
-        if (pId && pId !== userId.toString()) {
-          await notificationService.createNotification({
-            recipient: pId,
-            sender: userId,
-            type: "meeting_updated",
-            title: "Meeting Details Updated",
-            message: `${hostName} updated details for meeting "${populated.title}"`,
-            link: `/meetings/${populated._id}`,
-          });
-        }
+      for (const u of usersToNotify) {
+        // In-app notification
+        await notificationService.createNotification({
+          recipient: u._id,
+          sender: userId,
+          type: "meeting_updated",
+          title: "Meeting Details Updated",
+          message: `${hostName} updated details for meeting "${populated.title}"`,
+          link: `/meetings/${populated._id}/details`,
+        });
+
+        // Email notification
+        emailService.sendMeetingUpdatedEmail({
+          recipientEmail: u.email,
+          recipientName: u.name,
+          meeting: populated,
+          hostName,
+          workspaceName: populated.workspace?.name,
+          projectName: populated.project?.name,
+          changesSummary: "Schedule or details updated",
+        }).catch((e) => console.warn("Email update dispatch error:", e.message));
       }
     } catch (nErr) {
       console.warn("Meeting update notification error:", nErr.message);
     }
   }
 
-  return { meeting: populated || updated }
-}
+  return { meeting: populated || meeting };
+};
 
-const deleteMeeting = async (meetingId, userId) => {
-  const meeting = await meetingRepo.findById(meetingId)
+const cancelMeeting = async (meetingId, userId) => {
+  const meeting = await meetingRepo.findByIdPopulated(meetingId) || await meetingRepo.findById(meetingId);
   if (!meeting) {
-    const error = new Error("Meeting not found")
-    error.statusCode = 404
-    throw error
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
   }
 
-  if (meeting.host.toString() !== userId.toString()) {
-    const error = new Error("Only host can delete the meeting")
-    error.statusCode = 403
-    throw error
+  const hostId = (meeting.host?._id || meeting.host)?.toString();
+  if (hostId !== userId.toString()) {
+    const error = new Error("Only the host can cancel this meeting");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  if (meeting.status === "completed" || meeting.status === "ended" || meeting.status === "cancelled" || meeting.status === "expired") {
+    const error = new Error("This meeting cannot be cancelled as it is already completed, cancelled, or expired");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  meeting.status = "cancelled";
+  meeting.endedAt = new Date();
+  await meeting.save();
+
+  await clearMeetingCaches(meetingId, userId);
+
+  // Notify participants of meeting cancellation
+  const participants = meeting.participants || [];
+  if (participants.length > 0) {
+    try {
+      const emailService = require("./emailService");
+      const User = require("../models/User");
+      const host = await User.findById(userId);
+      const hostName = host?.name || "The host";
+      const pIds = participants.map((p) => (p._id || p).toString()).filter((id) => id !== userId.toString());
+      const pUsers = await User.find({ _id: { $in: pIds } });
+
+      for (const pUser of pUsers) {
+        notificationService.createNotification({
+          recipient: pUser._id,
+          sender: userId,
+          type: "meeting_cancelled",
+          title: "Meeting Cancelled",
+          message: `${hostName} cancelled meeting "${meeting.title}"`,
+          link: `/meetings/${meeting._id}/details`,
+        }).catch((e) => console.warn("Cancel notification error:", e.message));
+
+        emailService.sendMeetingCancelledEmail({
+          recipientEmail: pUser.email,
+          recipientName: pUser.name,
+          meeting,
+          hostName,
+          workspaceName: meeting.workspace?.name,
+        }).catch((e) => console.warn("Cancel email error:", e.message));
+      }
+    } catch (cErr) {
+      console.warn("Cancellation notification error:", cErr.message);
+    }
+  }
+
+  return { meeting };
+};
+
+const deleteMeeting = async (meetingId, userId) => {
+  const meeting = await meetingRepo.findByIdPopulated(meetingId) || await meetingRepo.findById(meetingId);
+  if (!meeting) {
+    const error = new Error("Meeting not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const hostId = (meeting.host?._id || meeting.host)?.toString();
+  if (hostId !== userId.toString()) {
+    const error = new Error("Only host can delete the meeting");
+    error.statusCode = 403;
+    throw error;
   }
 
   // 1. Permanently delete all recording files from Cloudinary and local disk if present
@@ -370,14 +743,45 @@ const deleteMeeting = async (meetingId, userId) => {
   const chatRepo = require("../repositories/chatRepository");
   await chatRepo.deleteAllByMeeting(meetingId);
 
-  // 3. Check if any participants attended / joined this meeting
-  const hasParticipants =
-    (meeting.participants && meeting.participants.length > 0) ||
-    meeting.status === "completed";
+  // 3. Notify participants of meeting cancellation if scheduled / upcoming
+  const participants = meeting.participants || [];
+  if (participants.length > 0) {
+    try {
+      const emailService = require("./emailService");
+      const User = require("../models/User");
+      const host = await User.findById(userId);
+      const hostName = host?.name || "The host";
+      const pIds = participants.map((p) => (p._id || p).toString()).filter((id) => id !== userId.toString());
+      const pUsers = await User.find({ _id: { $in: pIds } });
 
-  if (hasParticipants) {
+      for (const pUser of pUsers) {
+        notificationService.createNotification({
+          recipient: pUser._id,
+          sender: userId,
+          type: "meeting_cancelled",
+          title: "Meeting Cancelled",
+          message: `${hostName} cancelled meeting "${meeting.title}"`,
+          link: `/dashboard`,
+        }).catch((e) => console.warn("Cancel notification error:", e.message));
+
+        emailService.sendMeetingCancelledEmail({
+          recipientEmail: pUser.email,
+          recipientName: pUser.name,
+          meeting,
+          hostName,
+          workspaceName: meeting.workspace?.name,
+        }).catch((e) => console.warn("Cancel email error:", e.message));
+      }
+    } catch (cErr) {
+      console.warn("Cancellation notification error:", cErr.message);
+    }
+  }
+
+  // 4. Check if this was a completed / conducted meeting
+  const isConductedMeeting = meeting.status === "completed" && Boolean(meeting.startedAt);
+
+  if (isConductedMeeting) {
     // Keep meeting document for attendees to view meeting metadata and "Recording deleted by the host" notice.
-    // Mark as host-deleted and wipe recordingUrl so host will no longer see it on their dashboard.
     await meetingRepo.updateById(meetingId, {
       recordingUrl: "",
       recordings: [],
@@ -386,14 +790,14 @@ const deleteMeeting = async (meetingId, userId) => {
       hostDeletedAt: new Date(),
     });
   } else {
-    // If no other user ever attended or joined, permanently delete document from DB
+    // If cancelled, expired, scheduled, or never conducted: permanently delete from DB
     await meetingRepo.deleteById(meetingId);
   }
 
   await clearMeetingCaches(meetingId, userId);
 
   return { message: "Meeting deleted successfully" };
-}
+};
 
 const joinMeeting = async (meetingId, userId) => {
   const meeting = await meetingRepo.findById(meetingId)
@@ -403,10 +807,14 @@ const joinMeeting = async (meetingId, userId) => {
     throw error
   }
 
-  if (meeting.status === "completed" || meeting.status === "cancelled") {
-    const error = new Error("This meeting is no longer active")
-    error.statusCode = 400
-    throw error
+  if (meeting.status === "completed" || meeting.status === "cancelled" || meeting.status === "expired") {
+    const error = new Error(
+      meeting.status === "expired"
+        ? "This meeting has expired and is no longer available"
+        : "This meeting is no longer active"
+    );
+    error.statusCode = 400;
+    throw error;
   }
 
   const hostId = (meeting.host?._id || meeting.host)?.toString();
@@ -422,6 +830,8 @@ const joinMeeting = async (meetingId, userId) => {
       meeting.startedAt = now;
       meeting.status = "ongoing";
     }
+    // Record host join session for attendance tracking
+    await userRepo.recordMeetingJoin(userId, meetingId);
     return { meeting };
   }
 
@@ -434,18 +844,11 @@ const joinMeeting = async (meetingId, userId) => {
   if (!alreadyJoined) {
     await meetingRepo.addParticipant(meetingId, userId)
     await clearMeetingCaches(meetingId, userId)
-
-
   }
 
-  // Also ensure participant is recorded in attendedMeetings
+  // Record participant join session for attendance tracking
   if (user) {
-    const exists = (user.attendedMeetings || []).find(
-      (a) => a.meeting?.toString() === meetingId.toString()
-    );
-    if (!exists) {
-      await userRepo.addAttendedMeeting(userId, meetingId);
-    }
+    await userRepo.recordMeetingJoin(userId, meetingId);
   }
 
   const roomManager = require("../webrtc/roomManager")
@@ -533,30 +936,29 @@ const leaveMeeting = async (meetingId, userId) => {
   // Check if all participants (host + members) have now left
   const remainingUsers = roomManager.getRoomUsers(meetingId);
   if (remainingUsers.length === 0 && meeting.status === "ongoing") {
-    const nonHostParticipants = (meeting.participants || []).filter(
-      (p) => (p?._id || p)?.toString() !== hostId
-    );
-    const hasMembers = nonHostParticipants.length > 0;
-    const now = new Date();
-    await meetingRepo.updateById(meetingId, {
-      status: hasMembers ? "completed" : "scheduled",
-      endedAt: hasMembers ? now : null,
-      startedAt: hasMembers ? meeting.startedAt : null,
+    const User = require("../models/User");
+    const membersWhoAttended = await User.countDocuments({
+      "attendedMeetings.meeting": meetingId,
+      _id: { $ne: hostId },
     });
-    await clearMeetingCaches(meetingId, hostId);
+    // If NO non-host members ever attended the meeting (host joined alone and left),
+    // reset status back to scheduled so it doesn't get abandoned as completed or ongoing.
+    if (membersWhoAttended === 0) {
+      await meetingRepo.updateById(meetingId, {
+        status: "scheduled",
+        endedAt: null,
+        startedAt: null,
+      });
+      await clearMeetingCaches(meetingId, hostId);
+    }
+    // If members DID attend, DO NOT mark "completed" immediately here!
+    // The 5-minute empty room grace timer (scheduleEmptyRoomCompletion in meetingSocket.js)
+    // manages auto-completion, allowing participants and host to rejoin within 5 minutes if all leave.
   }
 
-  // Use $push / updateOne to avoid touching refreshToken
+  // Record leave session and accumulate attendance duration
   if (user) {
-    const exists = (user.attendedMeetings || []).find(
-      (a) => a.meeting?.toString() === meetingId.toString()
-    );
-
-    if (exists) {
-      await userRepo.updateAttendedMeeting(userId, meetingId);
-    } else {
-      await userRepo.addAttendedMeeting(userId, meetingId);
-    }
+    await userRepo.recordMeetingLeave(userId, meetingId);
   }
 
 
@@ -589,33 +991,18 @@ const endMeeting = async (meetingId, userId) => {
 
   const now = new Date();
 
-  // Add host + all participants to attendedMeetings using $push
-  const allUserIds = [meeting.host, ...meeting.participants];
+  // Close attendance sessions for all users who attended this meeting
+  await userRepo.closeMeetingSessions(meetingId, now);
 
-  for (const uid of allUserIds) {
-    const u = await userRepo.findById(uid);
-    if (!u) continue;
-
-    const exists = u.attendedMeetings.find(
-      (a) => a.meeting.toString() === meetingId.toString()
-    );
-
-    if (exists) {
-      await userRepo.updateAttendedMeeting(uid, meetingId);
-    } else {
-      await userRepo.addAttendedMeeting(uid, meetingId);
-    }
-  }
-
-  const nonHostParticipants = (meeting.participants || []).filter(
-    (p) => (p?._id || p)?.toString() !== hostId
-  );
-  const hasMembers = nonHostParticipants.length > 0;
+  try {
+    const { cancelEmptyRoomGraceTimer } = require("../socket/meetingSocket");
+    cancelEmptyRoomGraceTimer(meetingId);
+  } catch (e) {}
 
   const updateData = {
-    status: hasMembers ? "completed" : "scheduled",
-    endedAt: hasMembers ? now : null,
-    startedAt: hasMembers ? meeting.startedAt : null,
+    status: "completed",
+    endedAt: now,
+    startedAt: meeting.startedAt || now,
   };
 
   const updated = await meetingRepo.updateById(meetingId, updateData);
@@ -629,6 +1016,28 @@ const endMeeting = async (meetingId, userId) => {
     "Meeting Ended",
     `${updated.title} has been ended by the host`
   );
+
+  // Dispatch meeting ended email with AI summary link to participants
+  try {
+    const emailService = require("./emailService");
+    const User = require("../models/User");
+    const host = await User.findById(userId);
+    const hostName = host?.name || "The host";
+    const nonHostIds = (updated.participants || []).map((p) => (p._id || p).toString()).filter((id) => id !== userId.toString());
+    const pUsers = await User.find({ _id: { $in: nonHostIds } });
+
+    for (const pUser of pUsers) {
+      emailService.sendMeetingEndedEmail({
+        recipientEmail: pUser.email,
+        recipientName: pUser.name,
+        meeting: updated,
+        hostName,
+        workspaceName: updated.workspace?.name,
+      }).catch((e) => console.warn("Meeting ended email error:", e.message));
+    }
+  } catch (err) {
+    console.warn("Meeting ended email notification warning:", err.message);
+  }
 
   roomManager.clearRoom(meetingId);
 
@@ -651,6 +1060,195 @@ const hideMeetingFromUser = async (meetingId, userId) => {
   await userRepo.addHiddenMeeting(userId, meetingId);
 
   return { message: "Meeting removed from your list" };
+};
+
+// Calculate meeting statistics & analytics for user (hosted, joined, duration, attendance %)
+const getUserMeetingAnalytics = async (userId) => {
+  // Ensure unconducted past meetings are lazily auto-expired before computing analytics
+  await checkAndExpireScheduledMeetings();
+
+  const Meeting = require("../models/Meeting");
+  const User = require("../models/User");
+
+  const user = await User.findById(userId);
+  if (!user) {
+    const error = new Error("User not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const hiddenIdStrs = (user.hiddenMeetings || []).map((id) => id.toString());
+  const attendedMeetingIds = (user.attendedMeetings || []).map((a) => a.meeting);
+
+  // Retrieve ALL meetings associated with the user: hosted, participant, or attended
+  // Crucial: Do NOT filter out hiddenMeetings or host-deleted meetings so historical analytics remain intact!
+  const allMeetings = await Meeting.find({
+    $or: [
+      { host: userId },
+      { participants: userId },
+      { _id: { $in: attendedMeetingIds } },
+    ],
+  })
+    .populate("workspace", "name color code")
+    .populate("project", "name color")
+    .populate("host", "name username profilePicture")
+    .populate("participants", "name username profilePicture")
+    .sort({ startTime: -1, createdAt: -1 });
+
+  let totalHosted = 0;
+  let totalJoined = 0;
+  let totalDurationSeconds = 0;
+  let attendedCount = 0;
+  let totalScheduledForUser = 0;
+
+  const pastMeetings = [];
+  const upcomingMeetings = [];
+  const detailedMeetingList = [];
+
+  for (const m of allMeetings) {
+    const isHost = (m.host?._id || m.host)?.toString() === userId.toString();
+    const isHostDeleted = Boolean(m.isHostDeleted);
+    const isHiddenByMe = hiddenIdStrs.includes(m._id.toString());
+    
+    // Meeting is accessible only if neither hidden by the user nor deleted by the host
+    const isAccessible = !isHiddenByMe && !(isHost && isHostDeleted);
+
+    const attendedRecord = (user.attendedMeetings || []).find(
+      (a) => a.meeting?.toString() === m._id.toString()
+    );
+
+    // Calculate user's time spent in seconds (multi-session rejoins accumulation)
+    let userDurationSec = 0;
+    if (attendedRecord) {
+      if (typeof attendedRecord.totalDurationSeconds === "number" && attendedRecord.totalDurationSeconds > 0) {
+        userDurationSec = attendedRecord.totalDurationSeconds;
+      } else if (attendedRecord.sessions && attendedRecord.sessions.length > 0) {
+        userDurationSec = attendedRecord.sessions.reduce(
+          (sum, s) => sum + (s.durationSeconds || 0),
+          0
+        );
+      }
+      // Fallback for legacy meetings where duration was not logged in sessions
+      if (userDurationSec === 0 && m.startedAt && m.endedAt) {
+        userDurationSec = Math.max(
+          1,
+          Math.round((new Date(m.endedAt).getTime() - new Date(m.startedAt).getTime()) / 1000)
+        );
+      }
+    } else if (isHost && m.startedAt && m.endedAt && m.status === "completed") {
+      userDurationSec = Math.max(
+        1,
+        Math.round((new Date(m.endedAt).getTime() - new Date(m.startedAt).getTime()) / 1000)
+      );
+    }
+
+    // Determine participation status
+    let participationStatus = "scheduled";
+    const isActuallyConducted = (m.status === "completed" || Boolean(m.endedAt)) && Boolean(m.startedAt);
+
+    if (m.status === "cancelled") {
+      participationStatus = "cancelled";
+    } else if (m.status === "expired") {
+      // If user was invited but meeting expired without anyone joining, it's expired
+      participationStatus = "expired";
+    } else if (attendedRecord || (isHost && m.startedAt)) {
+      participationStatus = isHost ? "hosted" : "present";
+    } else if (isActuallyConducted || m.status === "completed") {
+      participationStatus = "absent";
+    } else if (m.status === "ongoing") {
+      participationStatus = attendedRecord ? (isHost ? "hosted" : "present") : "scheduled";
+    } else {
+      participationStatus = "scheduled";
+    }
+
+    // Accumulate metrics
+    if (m.status !== "cancelled") {
+      totalScheduledForUser++;
+
+      if (participationStatus === "hosted") {
+        totalHosted++;
+        attendedCount++;
+        totalDurationSeconds += userDurationSec;
+        pastMeetings.push(m);
+      } else if (participationStatus === "present") {
+        totalJoined++;
+        attendedCount++;
+        totalDurationSeconds += userDurationSec;
+        pastMeetings.push(m);
+      } else if (isActuallyConducted || m.status === "completed") {
+        pastMeetings.push(m);
+      } else if (m.status === "scheduled") {
+        upcomingMeetings.push(m);
+      }
+    }
+
+    // Format meeting month for grouping and selection
+    const meetingDate = new Date(m.startTime || m.scheduledAt || m.createdAt);
+    const monthName = meetingDate.toLocaleString("default", { month: "long", year: "numeric" });
+    const monthKey = `${meetingDate.getFullYear()}-${String(meetingDate.getMonth() + 1).padStart(2, "0")}`;
+
+    detailedMeetingList.push({
+      _id: m._id,
+      title: m.title,
+      description: m.description,
+      status: m.status,
+      participationStatus, // "present" | "absent" | "hosted" | "cancelled" | "expired" | "scheduled"
+      userDurationSeconds: userDurationSec,
+      startTime: m.startTime || m.scheduledAt || m.createdAt,
+      endTime: m.endTime || m.endedAt,
+      startedAt: m.startedAt,
+      endedAt: m.endedAt,
+      isHost,
+      isAccessible,
+      monthName,
+      monthKey,
+      host: m.host,
+      participants: m.participants,
+      workspace: m.workspace,
+      project: m.project,
+    });
+  }
+
+  const attendancePercentage =
+    totalScheduledForUser > 0
+      ? Math.round((attendedCount / totalScheduledForUser) * 100)
+      : 100;
+
+  // Monthly breakdown for charts & summary
+  const monthlyStats = {};
+  for (const item of detailedMeetingList) {
+    if (item.participationStatus !== "present" && item.participationStatus !== "hosted") {
+      continue;
+    }
+    const key = item.monthName;
+    if (!monthlyStats[key]) {
+      monthlyStats[key] = {
+        month: key,
+        monthKey: item.monthKey,
+        count: 0,
+        seconds: 0,
+        hours: 0,
+      };
+    }
+    monthlyStats[key].count += 1;
+    monthlyStats[key].seconds += item.userDurationSeconds;
+    monthlyStats[key].hours = Math.round((monthlyStats[key].seconds / 3600) * 10) / 10;
+  }
+
+  return {
+    totalMeetingsHosted: totalHosted,
+    totalMeetingsJoined: totalJoined,
+    totalTimeSpentSeconds: totalDurationSeconds,
+    totalTimeSpentMinutes: Math.round(totalDurationSeconds / 60),
+    totalTimeSpentHours: Math.round((totalDurationSeconds / 3600) * 10) / 10,
+    attendancePercentage,
+    sessionsAttended: attendedCount,
+    totalSessions: totalScheduledForUser,
+    upcomingCount: upcomingMeetings.length,
+    pastCount: pastMeetings.length,
+    monthlyBreakdown: Object.values(monthlyStats),
+    meetings: detailedMeetingList,
+  };
 };
 
 // Upload or save meeting recording URL (Fast local write + background Cloudinary sync, supports multiple recordings)
@@ -747,7 +1345,9 @@ module.exports = {
   getMeetingById,
   getMeetingByCode,
   getUserMeetings,
+  getUserMeetingAnalytics,
   updateMeeting,
+  cancelMeeting,
   deleteMeeting,
   joinMeeting,
   leaveMeeting,
@@ -755,4 +1355,5 @@ module.exports = {
   endMeeting,
   hideMeetingFromUser,
   uploadMeetingRecording,
-}
+  checkAndExpireScheduledMeetings,
+};

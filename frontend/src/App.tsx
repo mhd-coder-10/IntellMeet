@@ -39,6 +39,8 @@ function App() {
           <Route path="/meetings/details/:id" element={<MeetingDetails />} />
           <Route path="/teams" element={<TeamsList />} />
           <Route path="/teams/:id" element={<TeamDetail />} />
+          <Route path="/workspaces" element={<TeamsList />} />
+          <Route path="/workspaces/:id" element={<TeamDetail />} />
           <Route path="/teams/:teamId/projects/:projectId" element={<ProjectBoard />} />
           <Route path="/projects/:projectId" element={<ProjectBoard />} />
         </Route>
