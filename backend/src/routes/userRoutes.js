@@ -8,6 +8,7 @@ const {
   updateAvatar,
   removeAvatar,
   updatePassword,
+  deleteAccount,
 } = require("../controllers/userController")
 
 const { protect } = require("../middleware/auth.middleware")
@@ -26,6 +27,34 @@ const upload = require("../middleware/upload.middleware")
  *         description: Not authorized
  */
 router.get("/profile", protect, getProfile)
+
+/**
+ * @swagger
+ * /users/profile:
+ *   delete:
+ *     summary: Permanently delete account with password confirmation
+ *     tags: [Users]
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [password]
+ *             properties:
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Account permanently deleted
+ *       400:
+ *         description: Password required
+ *       401:
+ *         description: Incorrect password
+ */
+router.delete("/profile", protect, deleteAccount)
 
 /**
  * @swagger
