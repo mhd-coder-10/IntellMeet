@@ -1,0 +1,110 @@
+# ==============================================================================
+# IntellMeet - Production Docker Compose (Cloud & VPS Deployment)
+# Usage:
+#   docker compose -f docker-compose.prod.yml up --build -d
+# ==============================================================================
+
+version: "3.8"
+
+services:
+  # ----------------------------------------------------------------------------
+  # Redis - High-speed caching & Socket.io adapter
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: intellmeet-redis-prod
+    restart: always
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_prod_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - intellmeet-prod-network
+
+  # ----------------------------------------------------------------------------
+  # Backend - Production API Service with resource limits
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intellmeet-backend-prod
+    restart: always
+    ports:
+      - "5100:5100"
+    env_file:
+      - ./backend/.env
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - backend_prod_uploads:/usr/src/app/uploads
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 1536M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - intellmeet-prod-network
+
+  # ----------------------------------------------------------------------------
+  # Frontend - Production Web Server (Nginx)
+  # ----------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: intellmeet-frontend-prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - intellmeet-prod-network
+
+# ------------------------------------------------------------------------------
+# Volumes & Networks
+# ------------------------------------------------------------------------------
+volumes:
+  redis_prod_data:
+    name: intellmeet-redis-prod-data
+  backend_prod_uploads:
+    name: intellmeet-backend-prod-uploads
+
+networks:
+  intellmeet-prod-network:
+    name: intellmeet-prod-network
+    driver: bridge
