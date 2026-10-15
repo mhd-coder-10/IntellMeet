@@ -33,7 +33,7 @@ export function RecordConsentModal({
           <div>
             <h2 className="text-xl font-semibold text-white">Record meeting?</h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              {meetingTitle ? `"${meetingTitle}"` : "IntelliMeet Session"}
+              {meetingTitle ? `"${meetingTitle}"` : "IntellMeet Session"}
             </p>
           </div>
         </div>

@@ -18,6 +18,8 @@ router.delete("/:id", protect, teamController.deleteTeam);
 // Member & Join Request Management
 router.post("/:id/members", protect, teamController.addMember);
 router.delete("/:id/members/:userId", protect, teamController.removeMember);
+router.patch("/:id/members/:userId/role", protect, teamController.updateMemberRole);
+router.put("/:id/members/:userId/role", protect, teamController.updateMemberRole);
 router.post("/:id/requests/:userId/respond", protect, teamController.respondToJoinRequest);
 router.delete("/:id/requests", protect, teamController.cancelJoinRequest);
 

@@ -20,9 +20,12 @@ const notificationSchema = new mongoose.Schema(
             type: String,
             enum: [
                 "meeting_invite",
+                "meeting_invited",
                 "meeting_started",
+                "meeting_live",
                 "meeting_ended",
                 "meeting_updated",
+                "meeting_cancelled",
                 "chat_mention",
                 "action_item",
                 "system",

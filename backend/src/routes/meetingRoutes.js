@@ -8,9 +8,10 @@ const router = express.Router()
 const {
   createMeeting,
   getMeetingById,
-  getMeetingByCode,
   getUserMeetings,
+  getMeetingAnalytics,
   updateMeeting,
+  cancelMeeting,
   deleteMeeting,
   joinMeeting,
   leaveMeeting,
@@ -35,13 +36,24 @@ const { uploadRecording } = require("../middleware/upload.middleware")
  *         application/json:
  *           schema:
  *             type: object
- *             required: [title]
+ *             required: [title, workspace]
  *             properties:
  *               title:
  *                 type: string
+ *               workspace:
+ *                 type: string
+ *               project:
+ *                 type: string
+ *               participants:
+ *                 type: array
+ *                 items:
+ *                   type: string
  *               description:
  *                 type: string
- *               scheduledAt:
+ *               startTime:
+ *                 type: string
+ *                 format: date-time
+ *               endTime:
  *                 type: string
  *                 format: date-time
  *               settings:
@@ -50,7 +62,7 @@ const { uploadRecording } = require("../middleware/upload.middleware")
  *       201:
  *         description: Meeting created successfully
  *       400:
- *         description: Missing title
+ *         description: Missing title or workspace
  *       401:
  *         description: Not authorized
  */
@@ -72,6 +84,20 @@ router.get("/", protect, getUserMeetings);
 
 /**
  * @swagger
+ * /meetings/analytics:
+ *   get:
+ *     summary: Get meeting analytics (hosted, joined, attendance %, duration)
+ *     tags: [Meetings]
+ *     responses:
+ *       200:
+ *         description: Meeting analytics stats
+ *       401:
+ *         description: Not authorized
+ */
+router.get("/analytics", protect, getMeetingAnalytics);
+
+/**
+ * @swagger
  * /meetings/{id}/hide:
  *   delete:
  *     summary: Remove meeting from user's list (not from DB)
@@ -87,26 +113,6 @@ router.get("/", protect, getUserMeetings);
  *         description: Meeting removed from list
  */
 router.delete("/:id/hide", protect, hideMeeting);
-
-/**
- * @swagger
- * /meetings/code/{code}:
- *   get:
- *     summary: Get meeting by meeting code
- *     tags: [Meetings]
- *     parameters:
- *       - in: path
- *         name: code
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Meeting details
- *       404:
- *         description: Invalid meeting code
- */
-router.get("/code/:code", protect, getMeetingByCode);
 
 /**
  * @swagger
@@ -163,6 +169,7 @@ router.get("/:id", protect, getMeetingById);
  *         description: Only host can update
  */
 router.put("/:id", protect, updateMeeting);
+router.post("/:id/cancel", protect, cancelMeeting);
 
 /**
  * @swagger

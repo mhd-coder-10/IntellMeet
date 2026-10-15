@@ -10,6 +10,7 @@ import {
   Copy,
   Check,
   ShieldCheck,
+  ShieldAlert,
   UserPlus,
   UserMinus,
   ArrowRight,
@@ -32,6 +33,7 @@ import {
   deleteTeam,
   addTeamMember,
   removeTeamMember,
+  updateTeamMemberRole,
   createProject,
   updateProject,
   deleteProject,
@@ -232,6 +234,23 @@ export default function TeamDetail() {
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.message || "Failed to remove member");
+    },
+  });
+
+  // Update Member Role Mutation (Member <-> Admin)
+  const updateRoleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: "admin" | "member" }) =>
+      updateTeamMemberRole(teamId!, userId, role),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["team", teamId] });
+      toast.success(
+        vars.role === "admin"
+          ? "Promoted teammate to Workspace Admin!"
+          : "Demoted teammate to regular Member."
+      );
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || "Failed to update member role");
     },
   });
 
@@ -966,7 +985,7 @@ export default function TeamDetail() {
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                      <div className="flex items-center justify-between sm:justify-end gap-2.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 flex-wrap">
                         <span
                           className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${
                             isMemberOwner
@@ -980,18 +999,54 @@ export default function TeamDetail() {
                         </span>
 
                         {isAdmin && !isMemberOwner && !isSelf && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              setMemberToRemove({ id: user._id, name: user.name })
-                            }
-                            disabled={removeMemberMutation.isPending}
-                            className="text-red-500 hover:text-red-700 hover:bg-red-50 text-xs h-8 px-2.5 rounded-lg"
-                          >
-                            <UserMinus className="w-3.5 h-3.5 mr-1" />
-                            <span>Remove</span>
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            {/* Make Admin / Demote to Member Toggle Button */}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={updateRoleMutation.isPending}
+                              onClick={() => {
+                                const newRole = member.role === "admin" ? "member" : "admin";
+                                updateRoleMutation.mutate({
+                                  userId: user._id,
+                                  role: newRole,
+                                });
+                              }}
+                              className={`text-xs h-8 px-2.5 rounded-lg border transition font-medium cursor-pointer ${
+                                member.role === "admin"
+                                  ? "border-amber-200 text-amber-700 hover:bg-amber-50 bg-amber-50/40"
+                                  : "border-purple-200 text-purple-700 hover:bg-purple-50 bg-purple-50/40"
+                              }`}
+                              title={
+                                member.role === "admin"
+                                  ? "Demote to regular Member"
+                                  : "Promote to Workspace Admin"
+                              }
+                            >
+                              {updateRoleMutation.isPending &&
+                              (updateRoleMutation.variables as any)?.userId === user._id ? (
+                                <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                              ) : member.role === "admin" ? (
+                                <ShieldAlert className="w-3.5 h-3.5 mr-1 text-amber-600" />
+                              ) : (
+                                <ShieldCheck className="w-3.5 h-3.5 mr-1 text-purple-600" />
+                              )}
+                              <span>{member.role === "admin" ? "Demote to Member" : "Make Admin"}</span>
+                            </Button>
+
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                setMemberToRemove({ id: user._id, name: user.name })
+                              }
+                              disabled={removeMemberMutation.isPending}
+                              className="text-red-500 hover:text-red-700 hover:bg-red-50 text-xs h-8 px-2.5 rounded-lg cursor-pointer"
+                            >
+                              <UserMinus className="w-3.5 h-3.5 mr-1" />
+                              <span>Remove</span>
+                            </Button>
+                          </div>
                         )}
                       </div>
                     </div>

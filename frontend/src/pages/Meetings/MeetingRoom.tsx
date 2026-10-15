@@ -27,6 +27,8 @@ import { ParticipantList } from "@/components/Meetings/ParticipantList";
 import { RecordConsentModal } from "@/components/Meetings/RecordConsentModal";
 import { RecordingPreviewModal } from "@/components/Meetings/RecordingPreviewModal";
 import { RecordStopConfirmModal } from "@/components/Meetings/RecordStopConfirmModal";
+import { HostLeaveWarningModal } from "@/components/Meetings/HostLeaveWarningModal";
+import { EndMeetingConfirmModal } from "@/components/Meetings/EndMeetingConfirmModal";
 import { Button } from "@/components/ui/button";
 import { playRecordingStartChime, playRecordingStopChime } from "@/utils/meetingChime";
 
@@ -50,9 +52,12 @@ export default function MeetingRoom() {
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [isStopConfirmModalOpen, setIsStopConfirmModalOpen] = useState(false);
+  const [isHostLeaveWarningOpen, setIsHostLeaveWarningOpen] = useState(false);
+  const [isEndConfirmModalOpen, setIsEndConfirmModalOpen] = useState(false);
   const [remoteRecordingTime, setRemoteRecordingTime] = useState(0);
   const [remoteIsPaused, setRemoteIsPaused] = useState(false);
   const pendingRecordingRef = useRef<RecordedResult | null>(null);
+  const isAutoPausedDueToEmptyRoomRef = useRef(false);
 
   const { socket, isConnected } = useSocket();
   const user = useAuthStore((state) => state.user);
@@ -284,6 +289,41 @@ export default function MeetingRoom() {
     }
   }, [recordedResult]);
 
+  // Auto-pause recording if recorder is alone in the room, and auto-resume when participants join
+  useEffect(() => {
+    if (!isRecorderActive()) {
+      isAutoPausedDueToEmptyRoomRef.current = false;
+      return;
+    }
+
+    if (peers.length === 0) {
+      if (!isPaused && !isAutoPausedDueToEmptyRoomRef.current) {
+        pauseRecording();
+        socket?.emit("meeting:recording-paused", {
+          meetingId: id,
+          currentSeconds: recordingTime,
+        });
+        isAutoPausedDueToEmptyRoomRef.current = true;
+        toast.info("⏸️ Recording auto-paused (waiting for participants to join)");
+      }
+    } else {
+      if (isPaused && isAutoPausedDueToEmptyRoomRef.current) {
+        resumeRecording();
+        socket?.emit("meeting:recording-resumed", { meetingId: id });
+        isAutoPausedDueToEmptyRoomRef.current = false;
+        toast.info("▶️ Recording auto-resumed (participant joined)");
+      }
+    }
+  }, [
+    peers.length,
+    isPaused,
+    isRecorderActive,
+    pauseRecording,
+    resumeRecording,
+    socket,
+    id,
+  ]);
+
   // Listen for host ending or auto-concluded meeting
   useEffect(() => {
     if (!socket) return;
@@ -379,8 +419,10 @@ export default function MeetingRoom() {
       isSilent?: boolean;
     }) => {
       const recorderName = data.name || "Host";
-      setRecordingState(true, data.userId, recorderName, data.startedAt || Date.now());
-      setRemoteRecordingTime(0);
+      const startTimestamp = data.startedAt || Date.now();
+      setRecordingState(true, data.userId, recorderName, startTimestamp);
+      const elapsed = Math.max(0, Math.floor((Date.now() - startTimestamp) / 1000));
+      setRemoteRecordingTime(elapsed);
       setRemoteIsPaused(false);
       if (!data.isSilent) {
         toast.info("🔴 Recording Started by Host");
@@ -545,7 +587,7 @@ export default function MeetingRoom() {
     meeting?.host,
   ]);
 
-  const handleLeave = async () => {
+  const executeLeaveMeeting = async () => {
     if (isLeavingMeetingRef.current || isEndingMeetingRef.current) return;
     isLeavingMeetingRef.current = true;
 
@@ -566,9 +608,8 @@ export default function MeetingRoom() {
         pendingRecordingRef.current = null;
         clearRecordedResult();
         setRecordingState(false);
-        if (peers.length === 0) {
-          socket?.emit("meeting:recording-stopped", { meetingId: id });
-        }
+        // Always emit recording stopped so remaining peers don't keep running phantom timer
+        socket?.emit("meeting:recording-stopped", { meetingId: id });
         if (result && id) {
           const currentCount = meeting?.recordings?.length || 0;
           const partNumber = currentCount + 1;
@@ -583,7 +624,7 @@ export default function MeetingRoom() {
             duration: finalDuration,
             size: result.size,
           });
-          toast.success("Recording saved to Meeting Details!", { id: toastId });
+          toast.success("Recording saved!", { id: toastId });
         } else {
           toast.dismiss(toastId);
         }
@@ -591,6 +632,10 @@ export default function MeetingRoom() {
         console.error("Save recording on leave error:", err);
         toast.error("Failed to save recording", { id: toastId });
       }
+    } else {
+      // Non-recording participant leaving: ONLY reset local recording state.
+      // Do NOT emit "meeting:recording-stopped" to the room because Host is still recording!
+      setRecordingState(false);
     }
 
     if (id) {
@@ -611,6 +656,20 @@ export default function MeetingRoom() {
     }
     await queryClient.invalidateQueries({ queryKey: ["meetings"] });
     navigate(isHost ? `/meetings/${id}/details` : "/meetings", { replace: true });
+  };
+
+  const handleLeave = () => {
+    const activeRecording = isRecorderActive();
+    const hasPendingRecording = !!pendingRecordingRef.current;
+
+    // If host has an active or pending recording and there are other participants in the room,
+    // prompt host with options to avoid accidental disconnects
+    if (isHost && (activeRecording || hasPendingRecording) && peers.length > 0) {
+      setIsHostLeaveWarningOpen(true);
+      return;
+    }
+
+    executeLeaveMeeting();
   };
 
   const handleEndMeeting = async () => {
@@ -757,6 +816,7 @@ export default function MeetingRoom() {
 
   // Pause composite recording (host only)
   const handlePauseRecording = () => {
+    isAutoPausedDueToEmptyRoomRef.current = false;
     pauseRecording();
     socket?.emit("meeting:recording-paused", {
       meetingId: id,
@@ -767,6 +827,7 @@ export default function MeetingRoom() {
 
   // Resume composite recording (host only)
   const handleResumeRecording = () => {
+    isAutoPausedDueToEmptyRoomRef.current = false;
     resumeRecording();
     socket?.emit("meeting:recording-resumed", { meetingId: id });
     toast.info("Recording resumed");
@@ -793,9 +854,14 @@ export default function MeetingRoom() {
 
   // Redirect to Details if meeting has concluded
   useEffect(() => {
-    if (isEndingMeetingRef.current || isLeavingMeetingRef.current) return;
-    if (meeting?.status === "completed" || meeting?.status === "cancelled") {
-      toast.info("This meeting has concluded. Viewing details.");
+    if (meeting?.status === "completed" || meeting?.status === "cancelled" || meeting?.status === "expired") {
+      toast.info(
+        meeting?.status === "expired"
+          ? "This meeting has expired."
+          : meeting?.status === "cancelled"
+          ? "This meeting was cancelled."
+          : "This meeting has concluded."
+      );
       navigate(`/meetings/${id}/details`, { replace: true });
     }
   }, [meeting?.status, id, navigate]);
@@ -886,9 +952,11 @@ export default function MeetingRoom() {
             </span>
           </Button>
 
-          <span className="text-xs font-mono bg-gray-800/80 text-gray-300 px-2.5 py-1 rounded border border-gray-700/50">
-            {meeting?.meetingCode}
-          </span>
+          {meeting?.workspace && (
+            <span className="text-xs font-medium bg-gray-800/80 text-gray-300 px-2.5 py-1 rounded border border-gray-700/50">
+              {meeting.workspace.name}
+            </span>
+          )}
 
           {/* Google Meet Recording Badge with Live Pulse & Time */}
           {isRecording && (
@@ -1080,11 +1148,8 @@ export default function MeetingRoom() {
             {peers.length === 0 && (
               <div className="text-center text-gray-400 mt-12">
                 <p className="text-base text-gray-300">Waiting for other members to join...</p>
-                <p className="text-sm mt-2 text-gray-400">
-                  Share meeting code:{" "}
-                  <span className="font-mono font-bold text-blue-400 select-all">
-                    {meeting?.meetingCode}
-                  </span>
+                <p className="text-xs mt-1.5 text-gray-500">
+                  Invited participants will join automatically from their dashboard.
                 </p>
               </div>
             )}
@@ -1129,7 +1194,7 @@ export default function MeetingRoom() {
       {/* Google Meet Bottom Controls Bar */}
       <MeetingControls
         onLeave={handleLeave}
-        onEnd={handleEndMeeting}
+        onEnd={() => setIsEndConfirmModalOpen(true)}
         isHost={isHost}
         socket={socket}
         meetingId={id}
@@ -1169,6 +1234,34 @@ export default function MeetingRoom() {
         result={recordedResult}
         meetingTitle={meeting?.title}
         meetingId={id}
+      />
+
+      {/* Host Leave Warning Modal (prompt to End & Save or Stop & Leave) */}
+      <HostLeaveWarningModal
+        isOpen={isHostLeaveWarningOpen}
+        onCancel={() => setIsHostLeaveWarningOpen(false)}
+        onEndMeeting={() => {
+          setIsHostLeaveWarningOpen(false);
+          handleEndMeeting();
+        }}
+        onLeaveOnly={() => {
+          setIsHostLeaveWarningOpen(false);
+          executeLeaveMeeting();
+        }}
+        meetingTitle={meeting?.title}
+        isRecordingActive={isRecorderActive()}
+      />
+
+      {/* Host End Meeting Confirmation Modal */}
+      <EndMeetingConfirmModal
+        isOpen={isEndConfirmModalOpen}
+        onClose={() => setIsEndConfirmModalOpen(false)}
+        onConfirm={() => {
+          setIsEndConfirmModalOpen(false);
+          handleEndMeeting();
+        }}
+        meetingTitle={meeting?.title}
+        isRecordingActive={isRecorderActive()}
       />
     </div>
   );

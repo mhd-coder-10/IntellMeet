@@ -198,7 +198,7 @@ export function useCompositeRecording() {
 
       if (video.srcObject !== stream) {
         video.srcObject = stream;
-        video.play().catch(() => {});
+        video.play().catch(() => { });
       }
 
       return video;
@@ -357,7 +357,7 @@ export function useCompositeRecording() {
           entry.source.disconnect();
           entry.gainNode.disconnect();
           entry.analyser.disconnect();
-        } catch {}
+        } catch { }
         audioSourcesRef.current.delete(key);
       }
     });
@@ -784,7 +784,7 @@ export function useCompositeRecording() {
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, width, 48);
 
-      // Left: IntelliMeet brand & Title
+      // Left: IntellMeet brand & Title
       ctx.fillStyle = "#ffffff";
       ctx.font = "600 15px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
       ctx.textAlign = "left";
@@ -797,7 +797,7 @@ export function useCompositeRecording() {
       ctx.fill();
 
       ctx.fillStyle = "#ffffff";
-      ctx.fillText(`IntelliMeet  •  ${meetingTitle || "Meeting"}`, 48, 24);
+      ctx.fillText(`IntellMeet  •  ${meetingTitle || "Meeting"}`, 48, 24);
 
       // Right: REC badge + Timer
       const recText = `REC ${formatTimeCode(elapsedSec)}`;
@@ -968,7 +968,7 @@ export function useCompositeRecording() {
         if (screenInfo) {
           if (screenVideo.srcObject !== screenInfo.stream) {
             screenVideo.srcObject = screenInfo.stream;
-            screenVideo.play().catch(() => {});
+            screenVideo.play().catch(() => { });
           }
 
           if (screenVideo.readyState >= 2) {
@@ -998,7 +998,7 @@ export function useCompositeRecording() {
         drawTopBarOverlay(
           ctx,
           width,
-          currentMeetingId ? `Meeting` : "IntelliMeet",
+          currentMeetingId ? `Meeting` : "IntellMeet",
           Math.max(0, elapsed)
         );
       };
@@ -1231,12 +1231,12 @@ export function useCompositeRecording() {
         audioSourcesRef.current.forEach((entry) => {
           try {
             entry.source.disconnect();
-          } catch {}
+          } catch { }
         });
         audioSourcesRef.current.clear();
 
         if (audioContextRef.current) {
-          audioContextRef.current.close().catch(() => {});
+          audioContextRef.current.close().catch(() => { });
           audioContextRef.current = null;
         }
 
@@ -1283,7 +1283,7 @@ export function useCompositeRecording() {
         }
 
         const url = URL.createObjectURL(finalBlob);
-        const filename = `IntelliMeet-Recording-${new Date().toISOString().slice(0, 10)}_${Date.now()}.${format.extension}`;
+        const filename = `IntellMeet-Recording-${new Date().toISOString().slice(0, 10)}_${Date.now()}.${format.extension}`;
 
         const result: RecordedResult = {
           blob: finalBlob,
@@ -1351,7 +1351,7 @@ export function useCompositeRecording() {
       }
       cleanupVideoElements();
       if (audioContextRef.current) {
-        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current.close().catch(() => { });
         audioContextRef.current = null;
       }
       masterInputBusRef.current = null;

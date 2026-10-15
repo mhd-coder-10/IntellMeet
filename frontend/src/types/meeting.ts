@@ -23,7 +23,20 @@ export interface Meeting {
     description?: string
     host: MeetingParticipant
     participants: MeetingParticipant[]
-    meetingCode: string;
+    workspace?: {
+        _id: string;
+        name: string;
+        code?: string;
+        color?: string;
+        description?: string;
+    } | null;
+    project?: {
+        _id: string;
+        name: string;
+        color?: string;
+        description?: string;
+    } | null;
+    meetingCode?: string;
     scheduledAt: string;
     startTime?: string;
     endTime?: string | null;
@@ -36,9 +49,10 @@ export interface Meeting {
     recordingUserId?: string | null;
     recordingDeletedByHost?: boolean;
     isHostDeleted?: boolean;
-    status: 'scheduled' | 'ongoing' | 'completed' | 'cancelled';
+    wasAttended?: boolean;
+    attendedUserIds?: string[];
+    status: 'scheduled' | 'ongoing' | 'completed' | 'cancelled' | 'expired';
     settings: {
-        allowChat: boolean;
         allowScreenShare: boolean;
         muteOnJoin: boolean;
         waitingRoom: boolean;
@@ -49,10 +63,72 @@ export interface Meeting {
 
 export interface CreateMeetingPayload {
     title: string;
+    workspace: string;
+    project?: string | null;
+    participants: string[];
     description?: string;
     scheduledAt?: string;
     startTime?: string;
     endTime?: string | null;
+    settings?: {
+        allowChat?: boolean;
+        allowScreenShare?: boolean;
+        muteOnJoin?: boolean;
+        waitingRoom?: boolean;
+    };
+}
+
+export interface UpdateMeetingPayload {
+    title?: string;
+    workspace?: string;
+    project?: string | null;
+    participants?: string[];
+    description?: string;
+    scheduledAt?: string;
+    startTime?: string;
+    endTime?: string | null;
+    settings?: {
+        allowChat?: boolean;
+        allowScreenShare?: boolean;
+        muteOnJoin?: boolean;
+        waitingRoom?: boolean;
+    };
+}
+
+export interface MeetingAnalyticsItem {
+    _id: string;
+    title: string;
+    description?: string;
+    status: string;
+    participationStatus: "present" | "absent" | "hosted" | "cancelled" | "expired" | "scheduled";
+    userDurationSeconds: number;
+    startTime: string;
+    endTime?: string;
+    startedAt?: string;
+    endedAt?: string;
+    isHost: boolean;
+    isAccessible: boolean;
+    monthName: string;
+    monthKey: string;
+    host?: any;
+    participants?: any[];
+    workspace?: any;
+    project?: any;
+}
+
+export interface MeetingAnalytics {
+    totalMeetingsHosted: number;
+    totalMeetingsJoined: number;
+    totalTimeSpentSeconds: number;
+    totalTimeSpentMinutes: number;
+    totalTimeSpentHours: number;
+    attendancePercentage: number;
+    sessionsAttended: number;
+    totalSessions: number;
+    upcomingCount: number;
+    pastCount: number;
+    monthlyBreakdown: { month: string; monthKey?: string; count: number; seconds?: number; hours: number }[];
+    meetings?: MeetingAnalyticsItem[];
 }
 
 export interface VideoPeer {

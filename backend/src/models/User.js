@@ -83,10 +83,34 @@ const userSchema = new mongoose.Schema(
           type: mongoose.Schema.Types.ObjectId,
           ref: "Meeting",
         },
+        joinedAt: {
+          type: Date,
+          default: Date.now,
+        },
         leftAt: {
           type: Date,
           default: Date.now,
         },
+        totalDurationSeconds: {
+          type: Number,
+          default: 0,
+        },
+        sessions: [
+          {
+            joinedAt: {
+              type: Date,
+              default: Date.now,
+            },
+            leftAt: {
+              type: Date,
+              default: null,
+            },
+            durationSeconds: {
+              type: Number,
+              default: 0,
+            },
+          },
+        ],
       },
     ],
     

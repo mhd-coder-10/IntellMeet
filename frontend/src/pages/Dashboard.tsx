@@ -1,51 +1,121 @@
-// Enterprise Dashboard for IntelliMeet
-// Responsive layout, balanced slate aesthetic, quick room join, and meeting overview
+// Enterprise Dashboard for IntellMeet
+// Displays user identity, workspace shortcuts, and "Your Upcoming Meetings" (Today, Tomorrow, This Week)
+// with conditional real-time join controls and zero meeting codes
 
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useState, useMemo, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Video,
   Plus,
-  Search,
   Calendar,
-  Copy,
   ArrowRight,
   Sparkles,
-  Radio,
   Settings,
-  ShieldCheck,
   Info,
-  Trash2,
   Loader2,
   RefreshCw,
   FolderKanban,
+  Clock,
+  Briefcase,
+  Layers,
+  Users,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuthStore } from "@/store/authStore";
 import {
   getMyMeetings,
-  joinMeeting,
-  getMeetingByCode,
   hideMeeting,
   deleteMeeting,
 } from "@/services/meetingService";
 import { getErrorMessage } from "@/utils/errorHelper";
 import { ConfirmModal } from "@/components/common/ConfirmModal";
+import { useSocket } from "@/hooks/useSocket";
+import type { Meeting } from "@/types/meeting";
+
+// Helper to determine day group
+const isSameDay = (d1: Date, d2: Date) => {
+  return (
+    d1.getFullYear() === d2.getFullYear() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getDate() === d2.getDate()
+  );
+};
+
+const getMeetingDayGroup = (dateInput: string | Date) => {
+  const date = new Date(dateInput);
+  const today = new Date();
+  const tomorrow = new Date();
+  tomorrow.setDate(today.getDate() + 1);
+
+  if (isSameDay(date, today)) return "today";
+  if (isSameDay(date, tomorrow)) return "tomorrow";
+
+  const diffTime = date.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  if (diffDays <= 7 && diffDays > 0) return "thisWeek";
+  return "later";
+};
+
+// Countdown text helper
+const getCountdownText = (targetMs: number, currentMs: number) => {
+  const diff = targetMs - currentMs;
+  if (diff <= 0) return "Starting now";
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  if (hours > 24) {
+    const days = Math.floor(hours / 24);
+    return `Starts in ${days}d ${hours % 24}h`;
+  }
+  if (hours > 0) {
+    return `Starts in ${hours}h ${minutes}m`;
+  }
+  return `Starts in ${Math.max(1, minutes)}m`;
+};
 
 export default function Dashboard() {
   const user = useAuthStore((state) => state.user);
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  // Quick Join Code State
-  const [quickCode, setQuickCode] = useState("");
-  const [isJoining, setIsJoining] = useState(false);
-  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  const { socket } = useSocket();
+
+  // Auto-tick every 10 seconds to auto-enable Join button when start time arrives
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Real-time synchronization when meetings are scheduled, updated, or ended
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleSync = () => {
+      queryClient.invalidateQueries({ queryKey: ["meetings"] });
+    };
+
+    socket.on("meeting:created", handleSync);
+    socket.on("meeting:updated", handleSync);
+    socket.on("meeting:cancelled", handleSync);
+    socket.on("meeting:expired", handleSync);
+    socket.on("meeting:ended", handleSync);
+    socket.on("notification:new", handleSync);
+
+    return () => {
+      socket.off("meeting:created", handleSync);
+      socket.off("meeting:updated", handleSync);
+      socket.off("meeting:cancelled", handleSync);
+      socket.off("meeting:expired", handleSync);
+      socket.off("meeting:ended", handleSync);
+      socket.off("notification:new", handleSync);
+    };
+  }, [socket, queryClient]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -62,7 +132,7 @@ export default function Dashboard() {
     }
   };
 
-  // Fetch recent meetings
+  // Fetch user's meetings
   const { data: meetings, isLoading } = useQuery({
     queryKey: ["meetings"],
     queryFn: getMyMeetings,
@@ -95,35 +165,42 @@ export default function Dashboard() {
     }
   };
 
-  // Handle Quick Join
-  const handleQuickJoin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanCode = quickCode.trim().toUpperCase();
-    if (!cleanCode) {
-      toast.error("Please enter a meeting code");
-      return;
-    }
+  // Group upcoming meetings into Today, Tomorrow, This Week, and Later
+  const { todayMeetings, tomorrowMeetings, thisWeekMeetings, otherUpcoming } = useMemo(() => {
+    if (!meetings) return { todayMeetings: [], tomorrowMeetings: [], thisWeekMeetings: [], otherUpcoming: [] };
 
-    setIsJoining(true);
-    try {
-      const meeting = await getMeetingByCode(cleanCode);
-      await joinMeeting(meeting._id);
-      toast.success("Joined meeting successfully!");
-      navigate(`/meetings/${meeting._id}`);
-    } catch (error) {
-      toast.error(getErrorMessage(error));
-    } finally {
-      setIsJoining(false);
-    }
-  };
+    const upcoming = meetings.filter(
+      (m) => m.status !== "completed" && m.status !== "cancelled" && m.status !== "expired" && !m.endedAt
+    );
+    upcoming.sort((a, b) => {
+      const timeA = new Date(a.startTime || a.scheduledAt || a.createdAt).getTime();
+      const timeB = new Date(b.startTime || b.scheduledAt || b.createdAt).getTime();
+      return timeA - timeB;
+    });
 
-  // Copy Meeting Code helper
-  const handleCopyCode = (code: string) => {
-    navigator.clipboard.writeText(code);
-    toast.success(`Meeting code ${code} copied to clipboard!`);
-  };
+    const today: Meeting[] = [];
+    const tomorrow: Meeting[] = [];
+    const thisWeek: Meeting[] = [];
+    const later: Meeting[] = [];
 
-  const recentMeetings = meetings?.slice(0, 4) || [];
+    upcoming.forEach((m) => {
+      const group = getMeetingDayGroup(m.startTime || m.scheduledAt || m.createdAt);
+      if (group === "today") today.push(m);
+      else if (group === "tomorrow") tomorrow.push(m);
+      else if (group === "thisWeek") thisWeek.push(m);
+      else later.push(m);
+    });
+
+    return {
+      todayMeetings: today,
+      tomorrowMeetings: tomorrow,
+      thisWeekMeetings: thisWeek,
+      otherUpcoming: later,
+    };
+  }, [meetings]);
+
+  const totalUpcomingCount =
+    todayMeetings.length + tomorrowMeetings.length + thisWeekMeetings.length + otherUpcoming.length;
 
   const initials = (user?.name || "U")
     .split(" ")
@@ -132,12 +209,133 @@ export default function Dashboard() {
     .slice(0, 2)
     .toUpperCase();
 
+  // Helper renderer for an upcoming meeting card
+  const renderMeetingRow = (meeting: Meeting) => {
+    const isHost = meeting.host?._id === user?.id;
+    const startMs = new Date(meeting.startTime || meeting.scheduledAt).getTime();
+    const isFuture = now < startMs;
+    const isLive = !isFuture;
+
+    const formattedTime = new Date(meeting.startTime || meeting.scheduledAt).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    const endTimeFormatted = meeting.endTime
+      ? new Date(meeting.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "Open-ended";
+
+    const participantCount = (meeting.participants?.length || 0) + 1;
+
+    return (
+      <div
+        key={meeting._id}
+        className="p-4 sm:p-5 rounded-2xl border border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-md transition-all shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
+      >
+        <div className="space-y-1.5 min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-bold text-slate-900 text-base truncate">
+              {meeting.title}
+            </h3>
+
+            {/* Status Indicator */}
+            {isLive ? (
+              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 animate-pulse flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                LIVE NOW
+              </span>
+            ) : (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
+                {getCountdownText(startMs, now)}
+              </span>
+            )}
+
+            {isHost ? (
+              <span className="px-2 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700 border border-amber-200 font-semibold">
+                Host
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-700 border border-slate-200 font-medium">
+                Participant
+              </span>
+            )}
+          </div>
+
+          {/* Workspace, Project, and Schedule Context */}
+          <div className="flex items-center gap-3 flex-wrap text-xs text-slate-500 pt-0.5">
+            <span className="flex items-center gap-1 font-medium text-slate-700">
+              <Clock className="w-3.5 h-3.5 text-blue-600" />
+              {formattedTime} — {endTimeFormatted}
+            </span>
+
+            {meeting.workspace && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100">
+                <Briefcase className="w-3 h-3 text-indigo-500" />
+                {meeting.workspace.name}
+              </span>
+            )}
+
+            {meeting.project && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-100">
+                <Layers className="w-3 h-3 text-purple-500" />
+                {meeting.project.name}
+              </span>
+            )}
+
+            <span className="flex items-center gap-1">
+              <Users className="w-3.5 h-3.5 text-slate-400" />
+              {participantCount} {participantCount === 1 ? "member" : "members"}
+            </span>
+          </div>
+
+          {meeting.description && (
+            <p className="text-xs text-slate-500 line-clamp-1 pt-0.5">
+              {meeting.description}
+            </p>
+          )}
+        </div>
+
+        {/* Action Controls: Join & Details */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <Link to={`/meetings/${meeting._id}/details`}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs h-9 px-3.5 font-medium cursor-pointer"
+            >
+              <Info className="w-3.5 h-3.5 mr-1 text-blue-600" />
+              Details
+            </Button>
+          </Link>
+
+          {/* Conditional Join Button */}
+          {isLive ? (
+            <Link to={`/meetings/${meeting._id}`}>
+              <Button className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs h-9 px-4 font-semibold shadow-xs cursor-pointer">
+                <Video className="w-4 h-4 mr-1.5" />
+                Join Live Call
+              </Button>
+            </Link>
+          ) : (
+            <Button
+              disabled
+              title={`Meeting starts at ${formattedTime}`}
+              className="bg-slate-100 text-slate-400 border border-slate-200 rounded-xl text-xs h-9 px-4 font-medium opacity-80 cursor-not-allowed"
+            >
+              <Clock className="w-3.5 h-3.5 mr-1.5 text-slate-400" />
+              Starts at {formattedTime}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="w-full max-w-full overflow-x-hidden min-w-0">
       <main className="w-full px-4 sm:px-6 md:px-8 py-5 sm:py-8 space-y-6 sm:space-y-8 min-w-0">
         {/* Top Welcome & Identity Hero Banner */}
         <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-slate-200/90 bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-white p-5 sm:p-8 lg:p-10 shadow-xs">
-          {/* Subtle Ambient Glow */}
           <div className="absolute top-0 right-1/4 w-80 h-80 rounded-full bg-blue-400/10 blur-[90px] pointer-events-none" />
           <div className="absolute bottom-0 right-0 w-80 h-80 rounded-full bg-indigo-400/10 blur-[90px] pointer-events-none" />
 
@@ -193,19 +391,19 @@ export default function Dashboard() {
             {/* Quick Action Buttons */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
               <Link to="/meetings/create" className="w-full sm:w-auto">
-                <Button className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm shadow-blue-500/20 px-5 py-2.5 font-semibold text-sm flex items-center justify-center gap-2">
+                <Button className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm shadow-blue-500/20 px-5 py-2.5 font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer">
                   <Plus className="w-4 h-4" />
-                  New Meeting
+                  Schedule Meeting
                 </Button>
               </Link>
 
-              <Link to="/meetings/join" className="w-full sm:w-auto">
+              <Link to="/teams" className="w-full sm:w-auto">
                 <Button
                   variant="outline"
-                  className="w-full sm:w-auto border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-xl px-5 py-2.5 font-medium text-sm flex items-center justify-center gap-2"
+                  className="w-full sm:w-auto border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-xl px-5 py-2.5 font-medium text-sm flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <Search className="w-4 h-4 text-emerald-600" />
-                  Join Room
+                  <FolderKanban className="w-4 h-4 text-indigo-600" />
+                  Workspaces
                 </Button>
               </Link>
 
@@ -213,7 +411,7 @@ export default function Dashboard() {
                 variant="outline"
                 onClick={handleRefresh}
                 disabled={isRefreshing}
-                className="w-full sm:w-auto border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-xl px-4 py-2.5 font-medium text-sm flex items-center justify-center gap-2 shadow-xs"
+                className="w-full sm:w-auto border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-xl px-4 py-2.5 font-medium text-sm flex items-center justify-center gap-2 shadow-xs cursor-pointer"
                 title="Refresh dashboard data"
               >
                 <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin text-blue-600" : "text-slate-500"}`} />
@@ -223,67 +421,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Quick Join Widget & System Metrics */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 sm:gap-6">
-          {/* Quick Join Bar Card */}
-          <div className="lg:col-span-2 rounded-2xl border border-slate-200/90 bg-white p-5 sm:p-6 shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-slate-900 font-semibold text-sm">
-                <Radio className="w-4 h-4 text-emerald-600 animate-pulse" />
-                <span>Quick Room Join</span>
-              </div>
-              <span className="text-[11px] text-slate-500 hidden sm:inline">
-                Instant WebRTC Connection
-              </span>
-            </div>
-
-            <form onSubmit={handleQuickJoin} className="flex flex-col sm:flex-row gap-3">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400" />
-                <Input
-                  value={quickCode}
-                  onChange={(e) => setQuickCode(e.target.value.toUpperCase())}
-                  placeholder="Enter 8-digit Meeting Code (e.g. ABC12345)"
-                  className="pl-10 h-11 bg-slate-50 border-slate-200 focus:bg-white focus:border-blue-500 text-slate-900 placeholder:text-slate-400 font-mono tracking-wider text-sm rounded-xl"
-                  maxLength={10}
-                />
-              </div>
-              <Button
-                type="submit"
-                disabled={isJoining || !quickCode.trim()}
-                className="h-11 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm shadow-xs"
-              >
-                {isJoining ? "Connecting..." : "Join Now"}
-              </Button>
-            </form>
-          </div>
-
-          {/* Account Status Card */}
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 sm:p-6 shadow-xs flex flex-col justify-between">
-            <div className="space-y-1.5">
-              <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">
-                Account Status
-              </span>
-              <h3 className="text-slate-900 font-bold text-base sm:text-lg flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                Verified & Active
-              </h3>
-              <p className="text-slate-500 text-xs leading-relaxed">
-                Encrypted WebRTC conferencing and secure cloud storage enabled.
-              </p>
-            </div>
-
-            <div className="pt-4 flex items-center justify-between border-t border-slate-100 text-xs">
-              <span className="text-slate-500">Total Hosted Meetings:</span>
-              <span className="text-slate-900 font-bold font-mono text-sm">
-                {meetings?.length || 0}
-              </span>
-            </div>
-          </div>
-        </div>
-
         {/* Feature Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
           <Link to="/meetings/create" className="group">
             <Card className="h-full border-slate-200/90 bg-white hover:bg-slate-50/80 hover:border-blue-300 hover:shadow-md transition-all duration-200 rounded-2xl shadow-xs cursor-pointer">
               <CardContent className="p-5 sm:p-6 space-y-3">
@@ -292,28 +431,10 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <h3 className="text-slate-900 font-bold text-base group-hover:text-blue-600 transition">
-                    Start New Meeting
+                    Schedule Meeting
                   </h3>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Instant video call with screen sharing, member grid, and MP4 composite recording.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          <Link to="/meetings/join" className="group">
-            <Card className="h-full border-slate-200/90 bg-white hover:bg-slate-50/80 hover:border-emerald-300 hover:shadow-md transition-all duration-200 rounded-2xl shadow-xs cursor-pointer">
-              <CardContent className="p-5 sm:p-6 space-y-3">
-                <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100 group-hover:scale-105 transition transform">
-                  <Search className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-slate-900 font-bold text-base group-hover:text-emerald-600 transition">
-                    Join a Room
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Enter an invitation code to enter an active or scheduled conference room.
+                    Create a workspace meeting with all members or specific project teammates.
                   </p>
                 </div>
               </CardContent>
@@ -346,10 +467,10 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <h3 className="text-slate-900 font-bold text-base group-hover:text-purple-600 transition">
-                    Meeting History
+                    Meetings & Analytics
                   </h3>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    View upcoming, live, and completed meetings with full attendance details.
+                    View upcoming schedules, past recordings, attendance percentage, and call hours.
                   </p>
                 </div>
               </CardContent>
@@ -357,184 +478,126 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        {/* Recent & Upcoming Meetings List */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-blue-600" />
-              <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
-                Recent & Upcoming Meetings
-              </h2>
+        {/* SECTION 11: YOUR UPCOMING MEETINGS (Today, Tomorrow, Week) */}
+        <div className="space-y-6">
+          <div className="flex items-center justify-between border-b border-slate-200/90 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
+                  Your Upcoming Meetings
+                </h2>
+                <p className="text-xs text-slate-500">
+                  {totalUpcomingCount} session(s) scheduled on your workspace calendar
+                </p>
+              </div>
             </div>
+
             <Link
               to="/meetings"
               className="text-xs text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1 font-semibold"
             >
-              <span>View All ({meetings?.length || 0})</span>
+              <span>View All Meetings</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
 
           {isLoading ? (
             <div className="p-12 text-center text-slate-500 border border-slate-200/90 rounded-2xl bg-white shadow-xs">
-              <div className="inline-block animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full mb-3" />
-              <p className="text-sm font-medium">Loading your meetings...</p>
+              <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-3" />
+              <p className="text-sm font-medium">Loading upcoming meetings...</p>
             </div>
-          ) : recentMeetings.length === 0 ? (
-            <div className="p-10 text-center rounded-2xl border border-slate-200/90 bg-white shadow-xs space-y-4">
+          ) : totalUpcomingCount === 0 ? (
+            <div className="p-12 text-center rounded-2xl border border-slate-200/90 bg-white shadow-xs space-y-4">
               <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto border border-blue-100">
-                <Video className="w-7 h-7" />
+                <CheckCircle2 className="w-7 h-7" />
               </div>
               <div className="space-y-1">
-                <h3 className="text-base font-semibold text-slate-900">No meetings created yet</h3>
+                <h3 className="text-base font-semibold text-slate-900">
+                  No upcoming meetings scheduled
+                </h3>
                 <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                  Start your first meeting to collaborate with team members using live video, audio, and MP4 recording.
+                  You are all caught up! Schedule a new workspace meeting to invite colleagues and sync with team members.
                 </p>
               </div>
               <Link to="/meetings/create">
                 <Button className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs px-4 shadow-sm shadow-blue-500/20">
                   <Plus className="w-3.5 h-3.5 mr-1.5" />
-                  Create First Meeting
+                  Schedule First Meeting
                 </Button>
               </Link>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {recentMeetings.map((meeting) => {
-                const isHost = meeting.host._id === user?.id;
-                const isOngoing = meeting.status === "ongoing";
-
-                return (
-                  <div
-                    key={meeting._id}
-                    className="p-5 rounded-2xl border border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-md transition shadow-xs space-y-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-bold text-slate-900 text-base truncate max-w-[200px] sm:max-w-xs">
-                            {meeting.title}
-                          </h3>
-                          {isHost ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] bg-amber-50 text-amber-700 border border-amber-200 font-semibold">
-                              Host
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded text-[10px] bg-blue-50 text-blue-700 border border-blue-200 font-medium">
-                              Member
-                            </span>
-                          )}
-                        </div>
-                        {meeting.description && (
-                          <p className="text-xs text-slate-500 line-clamp-1">
-                            {meeting.description}
-                          </p>
-                        )}
-                      </div>
-
-                      <span
-                        className={`text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider shrink-0 ${
-                          isOngoing
-                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                            : meeting.status === "completed"
-                            ? "bg-slate-100 text-slate-600 border border-slate-200"
-                            : "bg-blue-50 text-blue-700 border border-blue-200"
-                        }`}
-                      >
-                        {meeting.status}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-500">Code:</span>
-                        <button
-                          onClick={() => handleCopyCode(meeting.meetingCode)}
-                          className="font-mono text-blue-700 hover:text-blue-800 font-bold flex items-center gap-1 bg-slate-100 hover:bg-slate-200/80 px-2 py-0.5 rounded border border-slate-200 cursor-pointer"
-                          title="Copy meeting code"
-                        >
-                          {meeting.meetingCode}
-                          <Copy className="w-3 h-3" />
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-1.5">
-                        <Link to={`/meetings/${meeting._id}/details`}>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs px-2.5 h-8 font-medium"
-                          >
-                            <Info className="w-3.5 h-3.5 mr-1 text-blue-600" />
-                            Details
-                          </Button>
-                        </Link>
-
-                        {meeting.status === "completed" || meeting.status === "cancelled" ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              setMeetingToRemove({
-                                id: meeting._id,
-                                isHost,
-                                title: meeting.title,
-                              })
-                            }
-                            disabled={removingId === meeting._id}
-                            className="border-red-200 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-xs px-2.5 h-8 font-medium"
-                          >
-                            {removingId === meeting._id ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
-                            ) : (
-                              <Trash2 className="w-3.5 h-3.5 mr-1" />
-                            )}
-                            Remove
-                          </Button>
-                        ) : (
-                          <Link to={`/meetings/${meeting._id}`}>
-                            <Button
-                              size="sm"
-                              className={`${
-                                isOngoing
-                                  ? "bg-emerald-600 hover:bg-emerald-700 shadow-xs"
-                                  : "bg-blue-600 hover:bg-blue-700 shadow-xs"
-                              } text-white rounded-xl text-xs px-3.5 h-8 font-medium`}
-                            >
-                              <Video className="w-3.5 h-3.5 mr-1" />
-                              {isOngoing ? "Enter Call" : isHost ? "Start Meeting" : "Join"}
-                            </Button>
-                          </Link>
-                        )}
-                      </div>
-                    </div>
+            <div className="space-y-6">
+              {/* GROUP 1: TODAY */}
+              {todayMeetings.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    <span className="w-2 h-2 rounded-full bg-blue-600" />
+                    <span>Today ({todayMeetings.length})</span>
                   </div>
-                );
-              })}
+                  <div className="space-y-3">
+                    {todayMeetings.map((meeting) => renderMeetingRow(meeting))}
+                  </div>
+                </div>
+              )}
+
+              {/* GROUP 2: TOMORROW */}
+              {tomorrowMeetings.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                    <span>Tomorrow ({tomorrowMeetings.length})</span>
+                  </div>
+                  <div className="space-y-3">
+                    {tomorrowMeetings.map((meeting) => renderMeetingRow(meeting))}
+                  </div>
+                </div>
+              )}
+
+              {/* GROUP 3: LATER THIS WEEK */}
+              {thisWeekMeetings.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    <span className="w-2 h-2 rounded-full bg-purple-500" />
+                    <span>Later This Week ({thisWeekMeetings.length})</span>
+                  </div>
+                  <div className="space-y-3">
+                    {thisWeekMeetings.map((meeting) => renderMeetingRow(meeting))}
+                  </div>
+                </div>
+              )}
+
+              {/* GROUP 4: LATER */}
+              {otherUpcoming.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    <span className="w-2 h-2 rounded-full bg-slate-400" />
+                    <span>Upcoming ({otherUpcoming.length})</span>
+                  </div>
+                  <div className="space-y-3">
+                    {otherUpcoming.map((meeting) => renderMeetingRow(meeting))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
-      </main>
 
-      {/* Remove / Delete Meeting Confirmation Modal */}
-      <ConfirmModal
-        isOpen={Boolean(meetingToRemove)}
-        onClose={() => setMeetingToRemove(null)}
-        onConfirm={confirmRemoveMeeting}
-        isLoading={Boolean(removingId)}
-        variant="danger"
-        title={
-          meetingToRemove?.isHost
-            ? "Delete Meeting Permanently?"
-            : "Remove Meeting from Dashboard?"
-        }
-        description={
-          meetingToRemove?.isHost
-            ? `Are you sure you want to delete "${meetingToRemove?.title}"? All recordings and details will be permanently lost.`
-            : `Are you sure you want to remove "${meetingToRemove?.title}" from your dashboard list?`
-        }
-        confirmText={meetingToRemove?.isHost ? "Delete Meeting" : "Remove"}
-      />
+        {/* Delete / Remove Modal */}
+        <ConfirmModal
+          isOpen={Boolean(meetingToRemove)}
+          onClose={() => setMeetingToRemove(null)}
+          onConfirm={confirmRemoveMeeting}
+          isLoading={Boolean(removingId)}
+          variant="danger"
+          title={meetingToRemove?.isHost ? "Delete Meeting Permanently?" : "Remove Meeting from Dashboard?"}
+          description={`Are you sure you want to remove "${meetingToRemove?.title}"?`}
+          confirmText={meetingToRemove?.isHost ? "Delete" : "Remove"}
+        />
+      </main>
     </div>
   );
 }

@@ -124,6 +124,34 @@ const removeMember = async (req, res) => {
   }
 };
 
+// Update member role (admin <-> member)
+const updateMemberRole = async (req, res) => {
+  try {
+    const { role } = req.body;
+    const team = await teamService.updateMemberRole(
+      req.params.id,
+      req.user.id,
+      req.params.userId,
+      role
+    );
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`team:${team._id}`).emit("team:updated", team);
+      io.emit("team:updated", team);
+    }
+    res.status(200).json({
+      success: true,
+      message: `Member role updated to ${role} successfully`,
+      data: team,
+    });
+  } catch (error) {
+    res.status(error.statusCode || 400).json({
+      success: false,
+      message: error.message || "Failed to update member role",
+    });
+  }
+};
+
 // Join team using invite code
 const joinTeamByCode = async (req, res) => {
   try {
@@ -204,6 +232,7 @@ module.exports = {
   deleteTeam,
   addMember,
   removeMember,
+  updateMemberRole,
   joinTeamByCode,
   respondToJoinRequest,
   cancelJoinRequest,

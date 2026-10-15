@@ -19,44 +19,104 @@ const clearMeetingCaches = async (meetingId, hostId) => {
   }
 };
 
-const autoEndMeetingIfEmpty = async (io, meetingId, userId) => {
-  try {
-    const roomUsers = roomManager.getRoomUsers(meetingId);
-    if (roomUsers.length === 0) {
+// Grace period timers for empty rooms: meetingId -> NodeJS.Timeout
+const emptyRoomGraceTimers = new Map();
+const EMPTY_ROOM_GRACE_DURATION_MS = 5 * 60 * 1000; // 5 minutes grace period
+
+const cancelEmptyRoomGraceTimer = (meetingId) => {
+  const mIdStr = meetingId?.toString();
+  if (mIdStr && emptyRoomGraceTimers.has(mIdStr)) {
+    clearTimeout(emptyRoomGraceTimers.get(mIdStr));
+    emptyRoomGraceTimers.delete(mIdStr);
+    console.log(`[Meeting Grace] Cancelled empty room grace timer for meeting ${mIdStr} (user rejoined or ended).`);
+    return true;
+  }
+  return false;
+};
+
+const scheduleEmptyRoomCompletion = (io, meetingId, userId) => {
+  const mIdStr = meetingId?.toString();
+  if (!mIdStr) return;
+
+  // If a grace timer is already running for this meeting, do not duplicate
+  if (emptyRoomGraceTimers.has(mIdStr)) {
+    return;
+  }
+
+  console.log(`[Meeting Grace] Room ${mIdStr} is empty. Starting 5-minute grace period before completing...`);
+
+  const timer = setTimeout(async () => {
+    emptyRoomGraceTimers.delete(mIdStr);
+    try {
+      // Re-verify room users: if anyone rejoined during the 5 minutes, abort
+      const currentUsers = roomManager.getRoomUsers(mIdStr);
+      if (currentUsers && currentUsers.length > 0) {
+        console.log(`[Meeting Grace] Room ${mIdStr} has active users (${currentUsers.length}). Aborting auto-completion.`);
+        return;
+      }
+
       const meetingRepo = require("../repositories/meetingRepository");
-      const meeting = await meetingRepo.findById(meetingId);
+      const meeting = await meetingRepo.findById(mIdStr);
+
       if (meeting && meeting.status === "ongoing") {
         const hostId = (meeting.host?._id || meeting.host)?.toString();
-        const nonHostParticipants = (meeting.participants || []).filter(
-          (p) => (p?._id || p)?.toString() !== hostId
-        );
-        const hasMembers = nonHostParticipants.length > 0;
         const now = new Date();
 
         const updateData = {
-          status: hasMembers ? "completed" : "scheduled",
-          endedAt: hasMembers ? now : null,
-          startedAt: hasMembers ? meeting.startedAt : null,
+          status: "completed",
+          endedAt: now,
+          startedAt: meeting.startedAt || now,
         };
 
-        await meetingRepo.updateById(meetingId, updateData);
-        await clearMeetingCaches(meetingId, hostId);
+        await meetingRepo.updateById(mIdStr, updateData);
+        const userRepo = require("../repositories/userRepository");
+        await userRepo.closeMeetingSessions(mIdStr, now);
 
-        io.to(meetingId).emit("meeting:ended", {
-          meetingId,
-          message: "Meeting has ended (all participants have left)",
+        console.log(`[Meeting Grace] Meeting ${mIdStr} auto-completed after 5 minutes empty room.`);
+
+        io.to(mIdStr).emit("meeting:ended", {
+          meetingId: mIdStr,
+          message: "Meeting has ended (all participants left and grace period expired)",
         });
-        io.in(meetingId).socketsLeave(meetingId);
+        io.to(mIdStr).emit("meeting:updated", {
+          meetingId: mIdStr,
+          status: "completed",
+        });
+        io.emit("meeting:updated", {
+          meetingId: mIdStr,
+          status: "completed",
+        });
+        io.emit("meeting:ended", {
+          meetingId: mIdStr,
+        });
+
+        io.in(mIdStr).socketsLeave(mIdStr);
+        roomManager.clearRoom(mIdStr);
       }
+    } catch (err) {
+      console.error("[Meeting Grace] Auto-complete error:", err.message);
     }
-  } catch (err) {
-    console.error("Auto end meeting on empty room error:", err.message);
-  }
+  }, EMPTY_ROOM_GRACE_DURATION_MS);
+
+  emptyRoomGraceTimers.set(mIdStr, timer);
 };
 
 const registerMeetingHandlers = (io, socket) => {
 
-  // Handle user joining a meeting
+  // Subscribe to meeting updates (for Details page & cards, without joining the live call room)
+  socket.on("meeting:subscribe", ({ meetingId }) => {
+    if (meetingId) {
+      socket.join(meetingId);
+    }
+  });
+
+  socket.on("meeting:unsubscribe", ({ meetingId }) => {
+    if (meetingId) {
+      socket.leave(meetingId);
+    }
+  });
+
+  // Handle user joining an active WebRTC meeting call room
   socket.on("meeting:join", async ({ meetingId }) => {
     if (!meetingId) return;
 
@@ -69,15 +129,20 @@ const registerMeetingHandlers = (io, socket) => {
         return;
       }
 
-      if (meeting.status === "completed" || meeting.status === "cancelled") {
+      if (meeting.status === "completed" || meeting.status === "cancelled" || meeting.status === "expired") {
         socket.emit("meeting:error", {
-          message: "This meeting is no longer active",
+          message: meeting.status === "expired"
+            ? "This meeting has expired and is no longer available"
+            : "This meeting is no longer active",
         });
         return;
       }
 
       socket.join(meetingId);
       socket.meetingId = meetingId;
+
+      // Cancel empty room grace timer if participant or host joins/rejoins
+      cancelEmptyRoomGraceTimer(meetingId);
 
       const userInfo = {
         name: socket.user.name,
@@ -107,20 +172,14 @@ const registerMeetingHandlers = (io, socket) => {
 
       if (!isHost && !alreadyParticipant) {
         await meetingRepo.addParticipant(meetingId, socket.user.id);
-        try {
-          const userRepo = require("../repositories/userRepository");
-          const user = await userRepo.findById(socket.user.id);
-          if (user) {
-            const exists = (user.attendedMeetings || []).find(
-              (a) => a.meeting?.toString() === meetingId.toString()
-            );
-            if (!exists) {
-              await userRepo.addAttendedMeeting(socket.user.id, meetingId);
-            }
-          }
-        } catch (uErr) {
-          console.warn("User attendance record error:", uErr.message);
-        }
+      }
+
+      // Record join session for user attendance tracking (host & participants, including rejoins)
+      try {
+        const userRepo = require("../repositories/userRepository");
+        await userRepo.recordMeetingJoin(socket.user.id, meetingId);
+      } catch (uErr) {
+        console.warn("User attendance record error:", uErr.message);
       }
 
       const users = roomManager.getRoomUsers(meetingId);
@@ -188,14 +247,10 @@ const registerMeetingHandlers = (io, socket) => {
       const meetingRepo = require("../repositories/meetingRepository");
       const meeting = await meetingRepo.findById(meetingId);
 
-      const hostId = (meeting.host?._id || meeting.host)?.toString();
-      if (meeting && hostId !== socket.user.id.toString()) {
-        try {
-          const userRepo = require("../repositories/userRepository");
-          await userRepo.updateAttendedMeeting(socket.user.id, meetingId);
-        } catch (err) {}
-        // Preserve participant in meeting attendance history
-      }
+      try {
+        const userRepo = require("../repositories/userRepository");
+        await userRepo.recordMeetingLeave(socket.user.id, meetingId);
+      } catch (err) {}
 
       socket.leave(meetingId);
       const leaveResult = roomManager.removeUserFromRoom(meetingId, socket.user.id);
@@ -207,15 +262,21 @@ const registerMeetingHandlers = (io, socket) => {
         });
       }
 
+      if (leaveResult?.wasRecording) {
+        io.to(meetingId).emit("meeting:recording-stopped", {
+          userId: socket.user.id,
+        });
+      }
+
       io.to(meetingId).emit("meeting:user-left", {
         userId: socket.user.id,
         name: socket.user.name,
         username: socket.user.username,
       });
 
-      // If room is now empty (all participants left), auto-end the meeting
+      // If room is now empty (all participants left), start 5-min grace period before completing
       if (leaveResult?.remainingCount === 0) {
-        await autoEndMeetingIfEmpty(io, meetingId, socket.user.id);
+        scheduleEmptyRoomCompletion(io, meetingId, socket.user.id);
       }
     } catch (err) {
       console.log("Meeting leave error:", err.message);
@@ -410,6 +471,7 @@ const registerMeetingHandlers = (io, socket) => {
   // Handle host ending meeting via socket
   socket.on("meeting:end", async ({ meetingId }) => {
     if (!meetingId) return;
+    cancelEmptyRoomGraceTimer(meetingId);
     io.to(meetingId).emit("meeting:ended", {
       meetingId,
       message: "Meeting has been ended by the host",
@@ -426,14 +488,10 @@ const registerMeetingHandlers = (io, socket) => {
         const meetingRepo = require("../repositories/meetingRepository");
         const meeting = await meetingRepo.findById(meetingId);
 
-        const hostId = (meeting.host?._id || meeting.host)?.toString();
-        if (meeting && hostId !== socket.user.id.toString()) {
-          try {
-            const userRepo = require("../repositories/userRepository");
-            await userRepo.updateAttendedMeeting(socket.user.id, meetingId);
-          } catch (err) {}
-          // Preserve participant in meeting attendance history
-        }
+        try {
+          const userRepo = require("../repositories/userRepository");
+          await userRepo.recordMeetingLeave(socket.user.id, meetingId);
+        } catch (err) {}
       } catch (err) {
         console.log("Disconnect cleanup error:", err.message);
       }
@@ -446,18 +504,24 @@ const registerMeetingHandlers = (io, socket) => {
         });
       }
 
+      if (disconnectResult?.wasRecording) {
+        io.to(meetingId).emit("meeting:recording-stopped", {
+          userId: socket.user.id,
+        });
+      }
+
       io.to(meetingId).emit("meeting:user-left", {
         userId: socket.user.id,
         name: socket.user.name,
         username: socket.user.username,
       });
 
-      // If room is now empty (all participants left), auto-end the meeting
+      // If room is now empty (all participants left), start 5-min grace period before completing
       if (disconnectResult?.remainingCount === 0) {
-        await autoEndMeetingIfEmpty(io, meetingId, socket.user.id);
+        scheduleEmptyRoomCompletion(io, meetingId, socket.user.id);
       }
     }
   });
 };
 
-module.exports = { registerMeetingHandlers };
+module.exports = { registerMeetingHandlers, cancelEmptyRoomGraceTimer };

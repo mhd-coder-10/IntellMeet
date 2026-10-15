@@ -57,7 +57,7 @@ export function Header() {
     .toUpperCase();
 
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-200/90 bg-white/95 backdrop-blur-md transition-colors shadow-xs">
+    <header className="fixed top-0 left-0 right-0 h-16 z-50 border-b border-slate-200/90 bg-white/95 backdrop-blur-md transition-colors shadow-xs">
       <div className="w-full flex h-16 items-center justify-between px-4 sm:px-6 md:px-8">
         {/* Brand Logo & Hover Sidebar Trigger */}
         <div className="flex items-center gap-2 sm:gap-3">
@@ -92,12 +92,9 @@ export function Header() {
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition transform shrink-0">
               <Video className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center">
               <span className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
-                IntellMeet
-              </span>
-              <span className="px-1.5 py-0.5 text-[9px] sm:text-[10px] font-bold bg-blue-50 text-blue-600 border border-blue-200 rounded-md tracking-wider">
-                PRO
+                Intell<span className="text-blue-600">Meet</span>
               </span>
             </div>
           </Link>

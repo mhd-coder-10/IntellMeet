@@ -11,11 +11,11 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-900 antialiased selection:bg-blue-100 flex flex-col w-full max-w-full overflow-x-hidden">
-      {/* Sticky Top Header */}
+      {/* Fixed Top Header */}
       <Header />
 
-      {/* Main Body Area with Hover-Expandable Sidebar & Dynamic Content Padding */}
-      <div className="flex-1 flex relative w-full max-w-full overflow-x-hidden min-w-0">
+      {/* Main Body Area with Hover-Expandable Sidebar & Dynamic Content Padding (pt-16 accounts for fixed header) */}
+      <div className="flex-1 flex relative w-full max-w-full overflow-x-hidden min-w-0 pt-16">
         <Sidebar />
 
         {/* Content Viewport Container

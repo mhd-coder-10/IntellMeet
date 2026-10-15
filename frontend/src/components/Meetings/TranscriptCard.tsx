@@ -31,7 +31,6 @@ import type { MeetingTranscript, TranscriptSegment } from "@/types/transcript";
 interface Props {
   meetingId: string;
   meetingTitle?: string;
-  meetingCode?: string;
   recordingIndex?: number;
   hasRecordings?: boolean;
   onSeekToTime?: (seconds: number) => void;
@@ -49,7 +48,6 @@ const formatSeconds = (sec: number) => {
 export function TranscriptCard({
   meetingId,
   meetingTitle = "Meeting",
-  meetingCode = "",
   recordingIndex = 0,
   hasRecordings = true,
   onSeekToTime,
@@ -93,7 +91,7 @@ export function TranscriptCard({
   const handleCopy = async () => {
     if (!transcript) return;
     try {
-      let copyText = `Meeting Transcript: ${meetingTitle} (${meetingCode})\n`;
+      let copyText = `Meeting Transcript: ${meetingTitle}\n`;
       copyText += `Duration: ${formatSeconds(transcript.duration)} | Words: ${transcript.wordCount}\n\n`;
 
       if (transcript.segments && transcript.segments.length > 0) {

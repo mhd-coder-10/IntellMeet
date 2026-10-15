@@ -95,10 +95,26 @@ const deleteProject = async (req, res) => {
   }
 };
 
+const getProjectMembers = async (req, res) => {
+  try {
+    const members = await projectService.getProjectMembers(req.params.id, req.user.id);
+    res.status(200).json({
+      success: true,
+      data: members,
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to fetch project members",
+    });
+  }
+};
+
 module.exports = {
   createProject,
   getProjectsByTeam,
   getProjectById,
+  getProjectMembers,
   updateProject,
   deleteProject,
 };

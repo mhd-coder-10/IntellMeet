@@ -7,19 +7,23 @@ const meetingService = require("../services/meetingService")
 // Create new meeting
 const createMeeting = async (req, res) => {
     try {
-        const data = await meetingService.createMeeting(req.user.id, req.body)
+        const data = await meetingService.createMeeting(req.user.id, req.body);
+        const io = req.app.get("io");
+        if (io) {
+            io.emit("meeting:created", data.meeting);
+        }
         res.status(201).json({
             success: true,
             message: "Meeting created successfully",
             data,
-        })
+        });
     } catch (error) {
         res.status(error.statusCode || 500).json({
             success: false,
             message: error.message,
-        })
+        });
     }
-}
+};
 
 // Get meeting by ID
 const getMeetingById = async (req, res) => {
@@ -50,15 +54,28 @@ const getMeetingByCode = async (req, res) => {
 // Get all meetings of current user
 const getUserMeetings = async (req, res) => {
     try {
-        const data = await meetingService.getUserMeetings(req.user.id)
-        res.status(200).json({ success: true, data })
+        const data = await meetingService.getUserMeetings(req.user.id);
+        res.status(200).json({ success: true, data });
     } catch (error) {
         res.status(error.statusCode || 500).json({
             success: false,
             message: error.message,
-        })
+        });
     }
-}
+};
+
+// Get meeting analytics for current user (total hosted, total joined, attendance %, duration)
+const getMeetingAnalytics = async (req, res) => {
+    try {
+        const data = await meetingService.getUserMeetingAnalytics(req.user.id);
+        res.status(200).json({ success: true, data });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
 
 // Update meeting
 const updateMeeting = async (req, res) => {
@@ -85,6 +102,31 @@ const updateMeeting = async (req, res) => {
         })
     }
 }
+
+// Cancel meeting
+const cancelMeeting = async (req, res) => {
+    try {
+        const data = await meetingService.cancelMeeting(
+            req.params.id,
+            req.user.id
+        );
+        const io = req.app.get("io");
+        if (io) {
+            io.emit("meeting:cancelled", data.meeting);
+            io.emit("meeting:updated", data.meeting);
+        }
+        res.status(200).json({
+            success: true,
+            message: "Meeting cancelled successfully",
+            data,
+        });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
 
 // Delete meeting
 const deleteMeeting = async (req, res) => {
@@ -264,7 +306,9 @@ module.exports = {
     getMeetingById,
     getMeetingByCode,
     getUserMeetings,
+    getMeetingAnalytics,
     updateMeeting,
+    cancelMeeting,
     deleteMeeting,
     joinMeeting,
     leaveMeeting,
@@ -272,4 +316,4 @@ module.exports = {
     endMeeting,
     hideMeeting,
     uploadMeetingRecording,
-}
+};

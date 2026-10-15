@@ -63,6 +63,19 @@ export const removeTeamMember = async (
   return res.data.data;
 };
 
+// Update team member role (admin <-> member)
+export const updateTeamMemberRole = async (
+  teamId: string,
+  userId: string,
+  role: "admin" | "member"
+): Promise<Team> => {
+  const res = await api.patch<{ success: boolean; data: Team }>(
+    `/teams/${teamId}/members/${userId}/role`,
+    { role }
+  );
+  return res.data.data;
+};
+
 // Join team using invite code
 export const joinTeamByCode = async (code: string): Promise<Team> => {
   const res = await api.post<{ success: boolean; data: Team; message?: string }>("/teams/join", {

@@ -94,7 +94,7 @@ export function SummaryAndActionItemsCard({
   useEffect(() => {
     if (!socket || !isConnected || !meetingId) return;
 
-    socket.emit("meeting:join", { meetingId });
+    socket.emit("meeting:subscribe", { meetingId });
 
     const handleActionItemUpdated = (updatedItem: MeetingActionItem) => {
       queryClient.setQueryData(
@@ -154,6 +154,7 @@ export function SummaryAndActionItemsCard({
     socket.on("summary:completed", handleSummaryCompleted);
 
     return () => {
+      socket.emit("meeting:unsubscribe", { meetingId });
       socket.off("action_item:updated", handleActionItemUpdated);
       socket.off("action_item:deleted", handleActionItemDeleted);
       socket.off("summary:deleted", handleSummaryDeleted);

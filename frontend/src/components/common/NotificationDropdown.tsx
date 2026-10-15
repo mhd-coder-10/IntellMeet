@@ -15,7 +15,7 @@ import {
   Users,
   Sparkles,
   Clock,
-  ArrowUpRight,
+  ArrowRight,
   CheckCircle2,
   AlertCircle,
   AtSign,
@@ -284,7 +284,13 @@ export function NotificationDropdown() {
     }
     if (notif.link) {
       setIsOpen(false);
-      navigate(notif.link);
+      // Normalize meeting link: always land on meeting details, never direct call room
+      let targetLink = notif.link;
+      const meetingMatch = targetLink.match(/^\/meetings\/([a-zA-Z0-9_-]+)$/);
+      if (meetingMatch && meetingMatch[1] && meetingMatch[1] !== "schedule") {
+        targetLink = `/meetings/${meetingMatch[1]}/details`;
+      }
+      navigate(targetLink);
     }
   };
 
@@ -465,11 +471,10 @@ export function NotificationDropdown() {
                             <button
                               type="button"
                               onClick={(e) => handleOpenDetails(e, notif)}
-                              className="px-2 py-0.5 text-[11px] font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition flex items-center gap-1 cursor-pointer"
-                              title="Open details"
+                              className="p-1 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition cursor-pointer"
+                              title="Go to details"
                             >
-                              <span>Open</span>
-                              <ArrowUpRight className="w-3.5 h-3.5" />
+                              <ArrowRight className="w-3.5 h-3.5" />
                             </button>
                           )}
 

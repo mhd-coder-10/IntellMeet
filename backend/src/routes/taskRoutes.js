@@ -8,6 +8,7 @@ const projectController = require("../controllers/projectController");
 const { protect } = require("../middleware/auth.middleware");
 
 // Project specific board endpoints
+router.get("/projects/:id/members", protect, projectController.getProjectMembers);
 router.get("/projects/:id", protect, projectController.getProjectById);
 router.put("/projects/:id", protect, projectController.updateProject);
 router.delete("/projects/:id", protect, projectController.deleteProject);

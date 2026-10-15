@@ -180,10 +180,96 @@ const deleteProject = async (projectId, userId) => {
   return { message: "Project board and all associated tasks deleted successfully", teamId };
 };
 
+// Get members belonging to or active in a project board (owner + assigned task members + task creators)
+const getProjectMembers = async (projectId, userId) => {
+  const project = await Project.findById(projectId).populate("owner", "name username email profilePicture");
+  if (!project) {
+    const error = new Error("Project board not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const team = await Team.findById(project.team)
+    .populate("owner", "name username email profilePicture")
+    .populate("members.user", "name username email profilePicture");
+
+  if (!team) {
+    const error = new Error("Parent workspace not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // Find all task assignees and creators for this project
+  const tasks = await Task.find({ project: projectId })
+    .populate("assignee", "name username email profilePicture")
+    .populate("creator", "name username email profilePicture")
+    .select("assignee creator");
+
+  const membersMap = new Map();
+
+  if (project.owner) {
+    membersMap.set(project.owner._id.toString(), {
+      _id: project.owner._id,
+      name: project.owner.name,
+      username: project.owner.username,
+      email: project.owner.email,
+      profilePicture: project.owner.profilePicture,
+    });
+  }
+
+  for (const t of tasks) {
+    if (t.assignee && t.assignee._id) {
+      membersMap.set(t.assignee._id.toString(), {
+        _id: t.assignee._id,
+        name: t.assignee.name,
+        username: t.assignee.username,
+        email: t.assignee.email,
+        profilePicture: t.assignee.profilePicture,
+      });
+    }
+    if (t.creator && t.creator._id) {
+      membersMap.set(t.creator._id.toString(), {
+        _id: t.creator._id,
+        name: t.creator.name,
+        username: t.creator.username,
+        email: t.creator.email,
+        profilePicture: t.creator.profilePicture,
+      });
+    }
+  }
+
+  // Fallback: If project has no tasks or only 1 member, provide all active workspace members so selection never fails
+  if (membersMap.size <= 1) {
+    if (team.owner) {
+      membersMap.set(team.owner._id.toString(), {
+        _id: team.owner._id,
+        name: team.owner.name,
+        username: team.owner.username,
+        email: team.owner.email,
+        profilePicture: team.owner.profilePicture,
+      });
+    }
+    (team.members || []).forEach((m) => {
+      if (m.user && (m.status === "active" || !m.status)) {
+        membersMap.set(m.user._id.toString(), {
+          _id: m.user._id,
+          name: m.user.name,
+          username: m.user.username,
+          email: m.user.email,
+          profilePicture: m.user.profilePicture,
+        });
+      }
+    });
+  }
+
+  return Array.from(membersMap.values());
+};
+
 module.exports = {
   createProject,
   getProjectsByTeam,
   getProjectById,
+  getProjectMembers,
   updateProject,
   deleteProject,
 };

@@ -267,18 +267,32 @@ const addMember = async (teamId, requesterId, { identifier, role = "member" }) =
 
   await team.save();
 
-  // Send notification to the added user
+  // Send in-app notification & Email invitation to the added user
+  const requesterUser = await User.findById(requesterId);
   try {
     await notificationService.createNotification({
       recipient: targetUser._id,
       sender: requesterId,
       type: "system",
       title: "Added to Team Workspace",
-      message: `You were added to the team "${team.name}"`,
+      message: `You were added to the workspace "${team.name}" by ${requesterUser?.name || "Workspace Admin"}`,
       link: `/teams/${team._id}`,
     });
   } catch (nErr) {
     console.warn("Notification error:", nErr.message);
+  }
+
+  try {
+    const emailService = require("./emailService");
+    emailService.sendWorkspaceInviteEmail({
+      recipientEmail: targetUser.email,
+      recipientName: targetUser.name,
+      team,
+      inviterName: requesterUser?.name || "Workspace Admin",
+      role: role || "member",
+    }).catch((e) => console.warn("Workspace email invite dispatch error:", e.message));
+  } catch (eErr) {
+    console.warn("Workspace email invite error:", eErr.message);
   }
 
   return await Team.findById(teamId)
@@ -290,28 +304,162 @@ const addMember = async (teamId, requesterId, { identifier, role = "member" }) =
 const removeMember = async (teamId, requesterId, targetUserId) => {
   const team = await Team.findById(teamId);
   if (!team) {
-    const error = new Error("Team not found");
+    const error = new Error("Workspace not found");
     error.statusCode = 404;
     throw error;
   }
 
+  const requesterMembership = team.members.find(
+    (m) => (m.user?._id || m.user)?.toString() === requesterId.toString()
+  );
+  const isOwner = (team.owner?._id || team.owner)?.toString() === requesterId.toString();
+  const isAdmin = requesterMembership && requesterMembership.role === "admin";
   const isSelf = requesterId.toString() === targetUserId.toString();
-  const isOwner = team.owner.toString() === requesterId.toString();
 
-  if (!isSelf && !isOwner) {
+  if (!isSelf && !isOwner && !isAdmin) {
     const error = new Error("You do not have permission to remove this member");
     error.statusCode = 403;
     throw error;
   }
 
-  if (team.owner.toString() === targetUserId.toString()) {
-    const error = new Error("Team owner cannot be removed from workspace");
+  if ((team.owner?._id || team.owner)?.toString() === targetUserId.toString()) {
+    const error = new Error("Workspace owner cannot be removed");
     error.statusCode = 400;
     throw error;
   }
 
-  team.members = team.members.filter((m) => m.user.toString() !== targetUserId.toString());
+  // Admins cannot remove other admins (only owner can remove an admin)
+  const targetMembership = team.members.find(
+    (m) => (m.user?._id || m.user)?.toString() === targetUserId.toString()
+  );
+  if (isAdmin && !isOwner && !isSelf && targetMembership && targetMembership.role === "admin") {
+    const error = new Error("Only the workspace owner can remove another admin");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  team.members = team.members.filter(
+    (m) => (m.user?._id || m.user)?.toString() !== targetUserId.toString()
+  );
   await team.save();
+
+  // Notify removed member via in-app alert and email
+  const requesterUser = await User.findById(requesterId);
+  try {
+    await notificationService.createNotification({
+      recipient: targetUserId,
+      sender: requesterId,
+      type: "system",
+      title: "Removed from Workspace",
+      message: `You were removed from workspace "${team.name}" by ${requesterUser?.name || "Workspace Admin"}`,
+      link: `/dashboard`,
+    });
+  } catch (nErr) {
+    console.warn("Notification error:", nErr.message);
+  }
+
+  try {
+    const targetUser = await User.findById(targetUserId);
+    if (targetUser?.email) {
+      const emailService = require("./emailService");
+      emailService.sendWorkspaceRemovedEmail({
+        recipientEmail: targetUser.email,
+        recipientName: targetUser.name,
+        team,
+        removedByName: requesterUser?.name || "Workspace Admin",
+      }).catch((e) => console.warn("Remove email dispatch error:", e.message));
+    }
+  } catch (eErr) {
+    console.warn("Remove email error:", eErr.message);
+  }
+
+  return await Team.findById(teamId)
+    .populate("owner", "name username email profilePicture")
+    .populate("members.user", "name username email profilePicture");
+};
+
+// Update member role (e.g. member -> admin, admin -> member)
+const updateMemberRole = async (teamId, requesterId, targetUserId, newRole) => {
+  const team = await Team.findById(teamId);
+  if (!team) {
+    const error = new Error("Workspace not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const requesterMembership = team.members.find(
+    (m) => (m.user?._id || m.user)?.toString() === requesterId.toString()
+  );
+  const isOwner = (team.owner?._id || team.owner)?.toString() === requesterId.toString();
+  const isAdmin = requesterMembership && requesterMembership.role === "admin";
+
+  if (!isOwner && !isAdmin) {
+    const error = new Error("Only workspace owners or admins can change member roles");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  if (!["admin", "member"].includes(newRole)) {
+    const error = new Error("Role must be either 'admin' or 'member'");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if ((team.owner?._id || team.owner)?.toString() === targetUserId.toString()) {
+    const error = new Error("Cannot change the workspace owner's role");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (requesterId.toString() === targetUserId.toString()) {
+    const error = new Error("You cannot change your own role");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const member = team.members.find(
+    (m) => (m.user?._id || m.user)?.toString() === targetUserId.toString()
+  );
+  if (!member) {
+    const error = new Error("User is not a member of this workspace");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  member.role = newRole;
+  await team.save();
+
+  // Send in-app notification to the target user
+  const requesterUserRole = await User.findById(requesterId);
+  try {
+    await notificationService.createNotification({
+      recipient: targetUserId,
+      sender: requesterId,
+      type: "system",
+      title: "Workspace Role Updated",
+      message: `Your role in "${team.name}" has been changed to ${newRole === "admin" ? "Admin" : "Member"} by ${requesterUserRole?.name || "Workspace Admin"}`,
+      link: `/teams/${team._id}`,
+    });
+  } catch (nErr) {
+    console.warn("Notification error:", nErr.message);
+  }
+
+  // Send email notification to target user
+  try {
+    const targetUser = await User.findById(targetUserId);
+    if (targetUser?.email) {
+      const emailService = require("./emailService");
+      emailService.sendWorkspaceRoleUpdatedEmail({
+        recipientEmail: targetUser.email,
+        recipientName: targetUser.name,
+        team,
+        newRole,
+        updatedByName: requesterUserRole?.name || "Workspace Admin",
+      }).catch((e) => console.warn("Role update email error:", e.message));
+    }
+  } catch (eErr) {
+    console.warn("Role update email error:", eErr.message);
+  }
 
   return await Team.findById(teamId)
     .populate("owner", "name username email profilePicture")
@@ -464,6 +612,20 @@ const respondToJoinRequest = async (teamId, ownerId, targetUserId, action) => {
     } catch (nErr) {
       console.warn("Notification error:", nErr.message);
     }
+
+    try {
+      const targetUser = await User.findById(targetUserId);
+      if (targetUser?.email) {
+        const emailService = require("./emailService");
+        emailService.sendWorkspaceJoinRequestAcceptedEmail({
+          recipientEmail: targetUser.email,
+          recipientName: targetUser.name,
+          team,
+        }).catch((e) => console.warn("Join accepted email dispatch error:", e.message));
+      }
+    } catch (eErr) {
+      console.warn("Join accepted email error:", eErr.message);
+    }
   } else if (action === "reject") {
     member.status = "rejected";
     await team.save();
@@ -514,6 +676,7 @@ module.exports = {
   deleteTeam,
   addMember,
   removeMember,
+  updateMemberRole,
   joinTeamByCode,
   respondToJoinRequest,
   cancelJoinRequest,
