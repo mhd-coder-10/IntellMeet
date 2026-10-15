@@ -1,0 +1,106 @@
+# IntellMeet - Docker Compose Orchestration (Local & Full Stack)
+# Orchestrates: Frontend (Nginx SPA), Backend (Express API), Redis, and MongoDB
+# Usage:
+#   docker compose up --build -d   # Start all services in background
+#   docker compose down            # Stop all services
+#   docker compose logs -f         # View live streaming logs
+
+version: "3.8"
+
+services:
+
+  # Redis - Session caching, meeting state & real-time messaging
+  redis:
+    image: redis:7-alpine
+    container_name: intellmeet-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - intellmeet-network
+
+  # MongoDB - Local database instance (used when MONGO_URI is not set to Atlas)
+  mongo:
+    image: mongo:7-jammy
+    container_name: intellmeet-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - intellmeet-network
+
+  # Backend - Node.js + Express API & Socket.io
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intellmeet-backend
+    restart: unless-stopped
+    ports:
+      - "5100:5100"
+    environment:
+      - PORT=5100
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017/intellmeet}
+      - JWT_SECRET=${JWT_SECRET:-intellmeet_super_secret_jwt_key_2026_production}
+      - JWT_EXPIRE=${JWT_EXPIRE:-15m}
+      - REFRESH_SECRET=${REFRESH_SECRET:-intellmeet_super_refresh_token_secret_key_2026}
+      - REFRESH_EXPIRE=${REFRESH_EXPIRE:-7d}
+      - CLIENT_URL=${CLIENT_URL:-http://localhost}
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - CLOUDINARY_FOLDER=${CLOUDINARY_FOLDER:-IntellMeet_AI_Powered_Meeting}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - EMAIL_HOST=${EMAIL_HOST}
+      - EMAIL_PORT=${EMAIL_PORT:-587}
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASS=${EMAIL_PASS}
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_started
+    volumes:
+      - backend_uploads:/usr/src/app/uploads
+    networks:
+      - intellmeet-network
+
+  # Frontend - React + Vite SPA served via Nginx with API reverse proxy
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: intellmeet-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - intellmeet-network
+
+# Persistent Volumes & Network Definitions
+volumes:
+  redis_data:
+    name: intellmeet-redis-data
+  mongo_data:
+    name: intellmeet-mongo-data
+  backend_uploads:
+    name: intellmeet-backend-uploads
+
+networks:
+  intellmeet-network:
+    name: intellmeet-network
+    driver: bridge
