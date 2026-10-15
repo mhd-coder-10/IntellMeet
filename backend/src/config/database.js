@@ -7,6 +7,18 @@ const connectDB = async () => {
     mongoose.connection.collection("meetings").dropIndex("meetingCode_1").catch(() => {});
 
     console.log("MongoDB connected successfully....");
+
+    // Pre-register all models so populated queries never fail with MissingSchemaError
+    require("../models/User");
+    require("../models/Team");
+    require("../models/Project");
+    require("../models/Meeting");
+    require("../models/Task");
+    require("../models/ActionItem");
+    require("../models/Summary");
+    require("../models/Transcript");
+    require("../models/Notification");
+    require("../models/ChatMessage");
   } catch (error) {
     console.error("\nMongoDB connection failed:", error.message);
     process.exit(1);

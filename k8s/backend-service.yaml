@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: intellmeet
+  labels:
+    app.kubernetes.io/name: intellmeet
+    app.kubernetes.io/component: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: intellmeet-backend
+  ports:
+    - port: 5100
+      targetPort: 5100
+      name: http

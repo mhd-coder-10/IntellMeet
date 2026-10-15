@@ -47,26 +47,14 @@ services:
     restart: unless-stopped
     ports:
       - "5100:5100"
+    env_file:
+      - ./backend/.env
     environment:
       - PORT=5100
       - NODE_ENV=production
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017/intellmeet}
-      - JWT_SECRET=${JWT_SECRET:-intellmeet_super_secret_jwt_key_2026_production}
-      - JWT_EXPIRE=${JWT_EXPIRE:-15m}
-      - REFRESH_SECRET=${REFRESH_SECRET:-intellmeet_super_refresh_token_secret_key_2026}
-      - REFRESH_EXPIRE=${REFRESH_EXPIRE:-7d}
       - CLIENT_URL=${CLIENT_URL:-http://localhost}
-      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
-      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
-      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
-      - CLOUDINARY_FOLDER=${CLOUDINARY_FOLDER:-IntellMeet_AI_Powered_Meeting}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - EMAIL_HOST=${EMAIL_HOST}
-      - EMAIL_PORT=${EMAIL_PORT:-587}
-      - EMAIL_USER=${EMAIL_USER}
-      - EMAIL_PASS=${EMAIL_PASS}
     depends_on:
       redis:
         condition: service_healthy

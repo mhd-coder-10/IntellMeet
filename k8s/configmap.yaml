@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: intellmeet-config
+  namespace: intellmeet
+  labels:
+    app.kubernetes.io/name: intellmeet
+    app.kubernetes.io/component: config
+data:
+  NODE_ENV: "production" 
+  PORT: "5100"
+  CLIENT_URL: "http://localhost:5173"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  CLOUDINARY_FOLDER: "IntellMeet_AI_Powered_Meeting"
+  JWT_ACCESS_TOKEN_EXPIRY: "7d"
+  JWT_REFERESH_TOKEN_EXPIRY: "15m"
+  SMTP_SERVICE: "gmail"
+  EMAIL_FROM: '"IntellMeet" <intellmeett16@gmail.com>'

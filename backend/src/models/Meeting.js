@@ -2,7 +2,10 @@
 // Defines the Meeting schema for MongoDB
 // Stores meeting details, host, participants, code, status and settings
 
-const mongoose = require("mongoose")
+const mongoose = require("mongoose");
+require("./User");
+require("./Team");
+require("./Project");
 
 const meetingSchema = new mongoose.Schema(
     {

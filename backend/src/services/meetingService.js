@@ -258,9 +258,10 @@ const getMeetingById = async (meetingId, userId = null) => {
   }
 
   // Ensure all users who attended or joined this meeting are present in meeting.participants
+  let attendedUsers = [];
   try {
     const User = require("../models/User");
-    const attendedUsers = await User.find({
+    attendedUsers = await User.find({
       "attendedMeetings.meeting": meeting._id,
     }).select("_id name username email profilePicture");
 
