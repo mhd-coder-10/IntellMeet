@@ -158,10 +158,69 @@ const updatePassword = async (userId, currentPassword, newPassword) => {
   return { message: "Password updated successfully" }
 }
 
+// Permanently delete user account with password verification and Cloudinary cleanup
+const deleteAccount = async (userId, password) => {
+  if (!password) {
+    const error = new Error("Please enter your current password to confirm account deletion");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const user = await userRepo.findByIdWithPassword(userId);
+  if (!user) {
+    const error = new Error("User not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const isMatch = await user.comparePassword(password);
+  if (!isMatch) {
+    const error = new Error("Incorrect password. Account deletion aborted.");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  // 1. Delete avatar from Cloudinary or local disk
+  if (user.profilePicture) {
+    try {
+      await deleteMediaFile(user.profilePicture);
+    } catch (cErr) {
+      console.warn("[deleteAccount] Failed to remove avatar from Cloudinary:", cErr.message);
+    }
+  }
+
+  // 2. Remove user from all team workspaces
+  try {
+    const Team = require("../models/Team");
+    await Team.updateMany(
+      { "members.user": userId },
+      { $pull: { members: { user: userId } } }
+    );
+  } catch (tErr) {
+    console.warn("[deleteAccount] Error removing user from teams:", tErr.message);
+  }
+
+  // 3. Remove user notifications
+  try {
+    const Notification = require("../models/Notification");
+    await Notification.deleteMany({
+      $or: [{ recipient: userId }, { sender: userId }],
+    });
+  } catch (nErr) {
+    console.warn("[deleteAccount] Error cleaning notifications:", nErr.message);
+  }
+
+  // 4. Permanently delete user document from database
+  await userRepo.deleteById(userId);
+
+  return { message: "Your account and all associated data have been permanently deleted." };
+};
+
 module.exports = {
   getProfile,
   updateProfile,
   updateAvatar,
   removeAvatar,
   updatePassword,
+  deleteAccount,
 }

@@ -143,6 +143,32 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
+// Automatically delete avatar from Cloudinary when user is removed from database
+userSchema.pre(["findOneAndDelete", "deleteOne", "deleteMany"], async function () {
+  try {
+    const { deleteMediaFile } = require("../utils/mediaStorage");
+    const docs = await this.model.find(this.getQuery());
+    for (const doc of docs) {
+      if (doc?.profilePicture) {
+        await deleteMediaFile(doc.profilePicture);
+      }
+    }
+  } catch (err) {
+    console.warn("[User Cleanup] Error removing avatar from Cloudinary during user deletion:", err.message);
+  }
+});
+
+userSchema.pre("remove", async function () {
+  try {
+    if (this.profilePicture) {
+      const { deleteMediaFile } = require("../utils/mediaStorage");
+      await deleteMediaFile(this.profilePicture);
+    }
+  } catch (err) {
+    console.warn("[User Cleanup] Error removing avatar from Cloudinary:", err.message);
+  }
+});
+
 const User = mongoose.model("User", userSchema);
 
 module.exports = User;

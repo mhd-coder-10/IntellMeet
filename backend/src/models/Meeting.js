@@ -131,6 +131,44 @@ const meetingSchema = new mongoose.Schema(
     { timestamps: true }
 )
 
+// Automatically delete all recordings from Cloudinary when meeting is removed from database
+meetingSchema.pre(["findOneAndDelete", "deleteOne", "deleteMany"], async function () {
+  try {
+    const { deleteMediaFile } = require("../utils/mediaStorage");
+    const docs = await this.model.find(this.getQuery());
+    for (const doc of docs) {
+      if (Array.isArray(doc.recordings) && doc.recordings.length > 0) {
+        for (const rec of doc.recordings) {
+          if (rec?.url) {
+            await deleteMediaFile(rec.url);
+          }
+        }
+      } else if (doc.recordingUrl) {
+        await deleteMediaFile(doc.recordingUrl);
+      }
+    }
+  } catch (err) {
+    console.warn("[Meeting Cleanup] Error removing recordings from Cloudinary during deletion:", err.message);
+  }
+});
+
+meetingSchema.pre("remove", async function () {
+  try {
+    const { deleteMediaFile } = require("../utils/mediaStorage");
+    if (Array.isArray(this.recordings) && this.recordings.length > 0) {
+      for (const rec of this.recordings) {
+        if (rec?.url) {
+          await deleteMediaFile(rec.url);
+        }
+      }
+    } else if (this.recordingUrl) {
+      await deleteMediaFile(this.recordingUrl);
+    }
+  } catch (err) {
+    console.warn("[Meeting Cleanup] Error removing recordings from Cloudinary:", err.message);
+  }
+});
+
 const Meeting = mongoose.model("Meeting", meetingSchema)
 
 module.exports = Meeting

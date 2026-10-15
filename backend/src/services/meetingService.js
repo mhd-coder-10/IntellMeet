@@ -1279,10 +1279,10 @@ const uploadMeetingRecording = async (meetingId, userId, file, recordingUrl, met
     finalUrl = `/uploads/recordings/${filename}`;
     fileSize = file.buffer.length;
 
-    // 2. Background sync to Cloudinary if configured (non-blocking)
-    if (process.env.CLOUDINARY_API_KEY && process.env.ENABLE_CLOUDINARY_RECORDINGS === "true") {
+    // 2. Background sync to Cloudinary (non-blocking)
+    if (process.env.CLOUDINARY_API_KEY) {
       uploadToCloudinary(file.buffer, {
-        subfolder: "recordings",
+        subfolder: "recording",
         resource_type: "video",
       })
         .then(async (result) => {

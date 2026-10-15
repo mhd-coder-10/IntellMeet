@@ -86,7 +86,7 @@ const detectResourceType = (url) => {
  * Uploads a buffer to Cloudinary with customizable folder and resource_type.
  */
 const uploadToCloudinary = (buffer, options = {}) => {
-  const baseFolder = process.env.CLOUDINARY_FOLDER || "IntellMeet_prs";
+  const baseFolder = process.env.CLOUDINARY_FOLDER || "IntellMeet_AI_Powered_Meeting";
   const subfolder = options.subfolder || "avatars";
   const resourceType = options.resource_type || "image";
   const folder = options.folder || `${baseFolder}/${subfolder}`;

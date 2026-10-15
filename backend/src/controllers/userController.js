@@ -87,10 +87,41 @@ const updatePassword = async (req, res) => {
   }
 }
 
+// Permanently delete user account
+const deleteAccount = async (req, res) => {
+  try {
+    const { password } = req.body || {}
+    const data = await userService.deleteAccount(req.user.id, password)
+
+    // Clear auth cookies
+    const isProduction = process.env.NODE_ENV === "production"
+    const clearOpts = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+      path: "/",
+    }
+    res.clearCookie("accessToken", clearOpts)
+    res.clearCookie("refreshToken", clearOpts)
+
+    res.status(200).json({
+      success: true,
+      message: data.message || "Account permanently deleted",
+      data,
+    })
+  } catch (error) {
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    })
+  }
+}
+
 module.exports = {
   getProfile,
   updateProfile,
   updateAvatar,
   removeAvatar,
   updatePassword,
+  deleteAccount,
 }

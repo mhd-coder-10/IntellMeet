@@ -19,6 +19,9 @@ import {
   Video,
   Loader2,
   RefreshCw,
+  AlertTriangle,
+  ShieldAlert,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,17 +34,49 @@ import {
   uploadAvatar,
   deleteAvatar,
   changePassword,
+  deleteAccount as deleteAccountApi,
 } from "@/services/userService";
 import { getErrorMessage } from "@/utils/errorHelper";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 export default function Profile() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user: authUser, setUser } = useAuthStore();
+  const { user: authUser, setUser, clearAuth } = useAuthStore();
 
   // Active sub-tab
   const [activeTab, setActiveTab] = useState<"general" | "security">("general");
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Delete Account Modal State
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [showDeletePassword, setShowDeletePassword] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deletePassword.trim()) {
+      setDeleteError("Please enter your current password to confirm");
+      return;
+    }
+
+    setIsDeleting(true);
+    setDeleteError("");
+    try {
+      await deleteAccountApi(deletePassword);
+      toast.success("Account permanently deleted. Goodbye!");
+      clearAuth();
+      navigate("/login");
+    } catch (err: any) {
+      const msg = getErrorMessage(err);
+      setDeleteError(msg);
+      toast.error(msg);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -699,9 +734,172 @@ export default function Profile() {
                 </form>
               </CardContent>
             </Card>
+
+            {/* Danger Zone: Permanent Account Deletion */}
+            <Card className="border-rose-200/80 bg-rose-50/20 rounded-2xl shadow-xs overflow-hidden">
+              <CardHeader className="border-b border-rose-100 bg-rose-50/60 pb-3">
+                <div className="flex items-center gap-2 text-rose-700">
+                  <AlertTriangle className="w-4 h-4 text-rose-600" />
+                  <CardTitle className="text-sm font-bold tracking-tight text-rose-900">
+                    Danger Zone
+                  </CardTitle>
+                </div>
+                <CardDescription className="text-xs text-rose-700/80">
+                  Permanently delete your IntellMeet account, profile pictures, and workspace memberships
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-4 pb-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-slate-900">
+                      Delete IntellMeet Account
+                    </p>
+                    <p className="text-xs text-slate-500 max-w-lg leading-relaxed">
+                      Once your account is deleted, all of your personal data, profile photos stored on Cloudinary, and team workspaces will be permanently erased. This action is completely irreversible.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setDeletePassword("");
+                      setDeleteError("");
+                      setIsDeleteModalOpen(true);
+                    }}
+                    className="border-rose-300 text-rose-600 hover:bg-rose-600 hover:text-white hover:border-rose-600 font-semibold text-xs h-10 px-4 rounded-xl shrink-0 cursor-pointer transition shadow-xs"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                    Delete Account
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         )}
       </main>
+
+      {/* Delete Account Password Confirmation Modal */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+            role="dialog"
+            aria-modal="true"
+          >
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex items-start justify-between bg-slate-50/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">
+                    Delete Account Permanently
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Security Verification Required
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isDeleting) {
+                    setIsDeleteModalOpen(false);
+                    setDeletePassword("");
+                    setDeleteError("");
+                  }
+                }}
+                disabled={isDeleting}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body & Form */}
+            <form onSubmit={handleDeleteAccount} className="p-5 space-y-4">
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200/80 text-xs text-rose-800 leading-relaxed">
+                <p className="font-semibold mb-0.5">⚠️ Warning: Irreversible Action</p>
+                This will immediately delete your account in MongoDB, wipe your avatar photo from Cloudinary, and revoke all active sessions. Please confirm by entering your current account password.
+              </div>
+
+              {/* Password Input */}
+              <div className="space-y-1.5">
+                <Label htmlFor="deleteAccountPassword" className="text-xs font-semibold text-slate-700">
+                  Enter Current Password
+                </Label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                  <Input
+                    id="deleteAccountPassword"
+                    type={showDeletePassword ? "text" : "password"}
+                    value={deletePassword}
+                    onChange={(e) => {
+                      setDeletePassword(e.target.value);
+                      if (deleteError) setDeleteError("");
+                    }}
+                    placeholder="Enter your current password"
+                    className="pl-9 pr-10 bg-slate-50 border-slate-200 focus:bg-white focus:border-rose-500 focus:ring-rose-500 text-slate-900 rounded-xl text-sm h-11"
+                    autoFocus
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowDeletePassword(!showDeletePassword)}
+                    className="absolute right-3 top-3 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    {showDeletePassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+                {deleteError && (
+                  <p className="text-xs text-rose-600 font-medium pt-1">
+                    {deleteError}
+                  </p>
+                )}
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsDeleteModalOpen(false);
+                    setDeletePassword("");
+                    setDeleteError("");
+                  }}
+                  disabled={isDeleting}
+                  className="rounded-xl text-xs h-10 px-4 border-slate-200 text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isDeleting || !deletePassword.trim()}
+                  className="rounded-xl text-xs h-10 px-5 bg-rose-600 hover:bg-rose-700 text-white font-semibold shadow-sm shadow-rose-500/20"
+                >
+                  {isDeleting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      Deleting Account...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                      Delete Permanently
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

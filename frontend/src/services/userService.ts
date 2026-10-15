@@ -55,3 +55,13 @@ export const changePassword = async (
   const response = await api.put("/users/password", payload);
   return response.data;
 };
+
+// Permanently delete user account with password confirmation
+export const deleteAccount = async (
+  password: string
+): Promise<{ message: string }> => {
+  const response = await api.delete("/users/profile", {
+    data: { password },
+  });
+  return response.data;
+};
