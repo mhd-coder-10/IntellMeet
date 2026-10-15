@@ -67,7 +67,7 @@ jobs:
       - name: Verify TypeScript & Build Vite SPA
         run: npm run build
         env:
-          VITE_API_URL: "https://intellmeet-api.onrender.com/api"
+          VITE_API_URL: ${{ vars.VITE_API_URL || 'http://localhost:5100/api' }}
 
   # Stage 3: Docker Images Verification (Multi-Stage Build Validation)
   docker-verification:
@@ -126,5 +126,5 @@ jobs:
             curl -fsSL -X POST "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}"
             echo "Vercel deployment successfully triggered!"
           else
-            echo "ℹVERCEL_DEPLOY_HOOK_URL secret not set. Skipping automated Vercel webhook trigger."
+            echo "VERCEL_DEPLOY_HOOK_URL secret not set. Skipping automated Vercel webhook trigger."
           fi
