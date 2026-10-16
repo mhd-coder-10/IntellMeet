@@ -923,8 +923,8 @@ export function useCompositeRecording() {
       pausedTimeRef.current = 0;
       pauseStartRef.current = 0;
 
-      // Frame pacing: lock to smooth 30 FPS (~33.33ms per frame)
-      const TARGET_FPS = 30;
+      // Frame pacing: lock to smooth 12 FPS (~83.33ms per frame) - optimal for screen sharing & crystal clear audio without file bloat
+      const TARGET_FPS = 12;
       const FRAME_DURATION = 1000 / TARGET_FPS;
       let lastDrawTime = 0;
       let lastAudioSync = 0;
@@ -1031,8 +1031,8 @@ export function useCompositeRecording() {
         drawCompositeFrame();
       };
 
-      // Capture 30fps canvas stream
-      const canvasStream = canvas.captureStream(30);
+      // Capture 12fps canvas stream - perfect for screen sharing & low bandwidth audio visualizer
+      const canvasStream = canvas.captureStream(12);
       const videoTrack = canvasStream.getVideoTracks()[0];
       const audioTrack = destination.stream.getAudioTracks()[0];
 
@@ -1046,7 +1046,7 @@ export function useCompositeRecording() {
       }
       const recordStream = new MediaStream(streamTracks);
 
-      // Detect best supported container & codecs (VP9/VP8 WebM prioritized for smooth seekable recording)
+      // Detect best supported container & codecs (VP8/VP9 WebM prioritized for smooth seekable recording)
       let selectedFormat: SupportedFormat =
         CANDIDATE_FORMATS[CANDIDATE_FORMATS.length - 1];
       for (const candidate of CANDIDATE_FORMATS) {
@@ -1060,8 +1060,8 @@ export function useCompositeRecording() {
       chunksRef.current = [];
       const recorder = new MediaRecorder(recordStream, {
         mimeType: selectedFormat.mimeType,
-        videoBitsPerSecond: 800000, // 800 kbps high-efficiency 720p 30fps (~6 MB/min)
-        audioBitsPerSecond: 64000, // 64 kbps crisp voice audio
+        videoBitsPerSecond: 250000, // 250 kbps lightweight screen/avatar encoding (~1.8 MB/min)
+        audioBitsPerSecond: 64000, // 64 kbps CD-quality voice audio
       });
 
       recorder.ondataavailable = (e) => {
@@ -1096,7 +1096,7 @@ export function useCompositeRecording() {
           }
           drawCompositeFrame();
         }
-      }, 33);
+      }, 80);
       renderIntervalRef.current = fallbackInterval;
 
       recorder.start(1000);

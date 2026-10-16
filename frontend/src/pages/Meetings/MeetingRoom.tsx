@@ -620,66 +620,61 @@ export default function MeetingRoom() {
     isLeavingMeetingRef.current = true;
 
     if (isScreenSharing) {
-      await stopScreenShare();
+      stopScreenShare().catch(() => {});
     }
 
     const activeRecording = isRecorderActive();
-    const hasPendingRecordings = pendingRecordingsRef.current.length > 0;
 
-    if (activeRecording || hasPendingRecordings) {
-      const toastId = toast.loading("Saving meeting recording... Please wait.");
+    if (activeRecording) {
       try {
-        if (activeRecording) {
-          const fresh = await stopRecording(true);
-          if (fresh) {
-            pendingRecordingsRef.current.push(fresh);
-          }
+        const fresh = await stopRecording(true);
+        if (fresh) {
+          pendingRecordingsRef.current.push(fresh);
         }
-        const recordingsToSave = [...pendingRecordingsRef.current];
-        pendingRecordingsRef.current = [];
-        clearRecordedResult();
-        setRecordingState(false);
-        // Always emit recording stopped so remaining peers don't keep running phantom timer
-        socket?.emit("meeting:recording-stopped", { meetingId: id });
-        if (recordingsToSave.length > 0 && id) {
-          for (let i = 0; i < recordingsToSave.length; i++) {
-            const rec = recordingsToSave[i];
-            const currentCount = meeting?.recordings?.length || 0;
-            const partNumber = currentCount + i + 1;
-            const finalDuration = rec.duration > 0 ? rec.duration : 1;
-            await uploadMeetingRecording(id, rec.blob, {
-              title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
-              duration: finalDuration,
-              size: rec.size,
-            });
-          }
-          toast.success("Recording saved!", { id: toastId });
-        } else {
-          toast.dismiss(toastId);
+      } catch (e) {
+        console.warn("Stop recording on leave error:", e);
+      }
+    }
+
+    // 1. Immediately cut off local mic & camera so voice stops transmitting instantly
+    stopLocalStream();
+    closeAllPeers();
+
+    // 2. Emit leave socket event immediately
+    if (id) {
+      socket?.emit("meeting:leave", { meetingId: id });
+      leaveMeeting(id).catch((err) => console.error("Leave error:", err));
+    }
+
+    // 3. Process and upload recordings if host was recording
+    const recordingsToSave = [...pendingRecordingsRef.current];
+    pendingRecordingsRef.current = [];
+    clearRecordedResult();
+    setRecordingState(false);
+    socket?.emit("meeting:recording-stopped", { meetingId: id });
+
+    if (recordingsToSave.length > 0 && id) {
+      const toastId = toast.loading("Saving meeting recording to Cloudinary... Please wait.");
+      try {
+        for (let i = 0; i < recordingsToSave.length; i++) {
+          const rec = recordingsToSave[i];
+          const currentCount = meeting?.recordings?.length || 0;
+          const partNumber = currentCount + i + 1;
+          const finalDuration = rec.duration > 0 ? rec.duration : 1;
+          await uploadMeetingRecording(id, rec.blob, {
+            title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
+            duration: finalDuration,
+            size: rec.size,
+          });
         }
+        toast.success("Recording saved!", { id: toastId });
       } catch (err) {
         console.error("Save recording on leave error:", err);
         toast.error("Failed to upload recording to cloud. Please check network.", { id: toastId });
       }
-    } else {
-      // Non-recording participant leaving: ONLY reset local recording state.
-      // Do NOT emit "meeting:recording-stopped" to the room because Host is still recording!
-      setRecordingState(false);
     }
 
-    if (id) {
-      try {
-        socket?.emit("meeting:leave", { meetingId: id });
-        await leaveMeeting(id);
-      } catch (err) {
-        console.error("Leave error:", err);
-      }
-    }
-
-    stopLocalStream();
-    closeAllPeers();
     resetMeeting();
-
     if (id) {
       await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
     }
@@ -706,65 +701,64 @@ export default function MeetingRoom() {
     isEndingMeetingRef.current = true;
 
     if (isScreenSharing) {
-      await stopScreenShare();
+      stopScreenShare().catch(() => {});
     }
 
     const activeRecording = isRecorderActive();
-    const hasPendingRecordings = pendingRecordingsRef.current.length > 0;
-
-    if (activeRecording || hasPendingRecordings) {
-      const toastId = toast.loading("Saving meeting recording... Please wait.");
+    if (activeRecording) {
       try {
-        if (activeRecording) {
-          const fresh = await stopRecording(true);
-          if (fresh) {
-            pendingRecordingsRef.current.push(fresh);
-          }
+        const fresh = await stopRecording(true);
+        if (fresh) {
+          pendingRecordingsRef.current.push(fresh);
         }
-        const recordingsToSave = [...pendingRecordingsRef.current];
-        pendingRecordingsRef.current = [];
-        clearRecordedResult();
-        setRecordingState(false);
-        socket?.emit("meeting:recording-stopped", { meetingId: id });
-        if (recordingsToSave.length > 0 && id) {
-          for (let i = 0; i < recordingsToSave.length; i++) {
-            const rec = recordingsToSave[i];
-            const currentCount = meeting?.recordings?.length || 0;
-            const partNumber = currentCount + i + 1;
-            const finalDuration = rec.duration > 0 ? rec.duration : 1;
-            await uploadMeetingRecording(id, rec.blob, {
-              title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
-              duration: finalDuration,
-              size: rec.size,
-            });
-          }
-          toast.success("Recording saved to Meeting Details!", { id: toastId });
-        } else {
-          toast.dismiss(toastId);
+      } catch (e) {
+        console.warn("Stop recording on end error:", e);
+      }
+    }
+
+    // 1. Immediately cut off local mic & camera so NO voice continues playing to other participants
+    stopLocalStream();
+    closeAllPeers();
+
+    // 2. Broadcast meeting:end immediately so all participants exit to details instantly
+    try {
+      socket?.emit("meeting:end", { meetingId: id });
+      socket?.emit("meeting:leave", { meetingId: id });
+      endMeeting(id).catch((err) => console.error("End meeting API error:", err));
+      toast.success("Meeting ended");
+    } catch (err) {
+      console.error("End meeting error:", err);
+    }
+
+    // 3. Process pending recordings and upload directly to Cloudinary
+    const recordingsToSave = [...pendingRecordingsRef.current];
+    pendingRecordingsRef.current = [];
+    clearRecordedResult();
+    setRecordingState(false);
+    socket?.emit("meeting:recording-stopped", { meetingId: id });
+
+    if (recordingsToSave.length > 0 && id) {
+      const toastId = toast.loading("Saving meeting recording to Cloudinary... Please wait.");
+      try {
+        for (let i = 0; i < recordingsToSave.length; i++) {
+          const rec = recordingsToSave[i];
+          const currentCount = meeting?.recordings?.length || 0;
+          const partNumber = currentCount + i + 1;
+          const finalDuration = rec.duration > 0 ? rec.duration : 1;
+          await uploadMeetingRecording(id, rec.blob, {
+            title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
+            duration: finalDuration,
+            size: rec.size,
+          });
         }
+        toast.success("Recording saved to Meeting Details!", { id: toastId });
       } catch (err) {
         console.error("Auto upload recording on end:", err);
         toast.error("Failed to upload recording to cloud. Please check network.", { id: toastId });
       }
-    } else if (isRecording) {
-      setRecordingState(false);
-      socket?.emit("meeting:recording-stopped", { meetingId: id });
     }
 
-    try {
-      socket?.emit("meeting:end", { meetingId: id });
-      socket?.emit("meeting:leave", { meetingId: id });
-      await endMeeting(id);
-      toast.success("Meeting ended");
-    } catch (err) {
-      console.error("End meeting error:", err);
-      toast.error("Failed to end meeting");
-    }
-
-    stopLocalStream();
-    closeAllPeers();
     resetMeeting();
-
     await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
     await queryClient.invalidateQueries({ queryKey: ["meetings"] });
     navigate(`/meetings/${id}/details`, { replace: true });
