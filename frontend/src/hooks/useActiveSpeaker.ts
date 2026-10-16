@@ -33,7 +33,6 @@ export function useActiveSpeaker({
     >
   >(new Map());
   const lastSpokeTimeRef = useRef<{ id: string; time: number } | null>(null);
-  const animFrameRef = useRef<number | null>(null);
 
   const { activeSpeakerId, setActiveSpeakerId } = useMeetingStore();
 
@@ -55,7 +54,7 @@ export function useActiveSpeaker({
 
     // Resume AudioContext if suspended
     if (audioCtx.state === "suspended") {
-      audioCtx.resume().catch(() => {});
+      audioCtx.resume().catch(() => { });
     }
 
     const activeIds = new Set<string>();
@@ -68,7 +67,7 @@ export function useActiveSpeaker({
         if (existing) {
           try {
             existing.source.disconnect();
-          } catch {}
+          } catch { }
           analysersRef.current.delete(id);
         }
         return;
@@ -80,7 +79,7 @@ export function useActiveSpeaker({
         if (existing) {
           try {
             existing.source.disconnect();
-          } catch {}
+          } catch { }
           analysersRef.current.delete(id);
         }
         return;
@@ -124,59 +123,59 @@ export function useActiveSpeaker({
         if (item) {
           try {
             item.source.disconnect();
-          } catch {}
+          } catch { }
           analysersRef.current.delete(id);
         }
       }
     });
 
-    // Loop to continuously evaluate audio levels
+    // Loop to continuously evaluate audio levels (every 100ms to keep CPU minimal and prevent meeting hang)
     const checkAudioLevels = () => {
       let maxVolume = 0;
       let loudSpeakerId: string | null = null;
       const now = Date.now();
 
       analysersRef.current.forEach(({ analyser, dataArray }, id) => {
-        analyser.getByteFrequencyData(dataArray as any);
+        try {
+          analyser.getByteFrequencyData(dataArray as any);
 
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const avg = sum / dataArray.length;
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            sum += dataArray[i];
+          }
+          const avg = sum / dataArray.length;
 
-        if (avg > SPEAKING_THRESHOLD && avg > maxVolume) {
-          maxVolume = avg;
-          loudSpeakerId = id;
-        }
+          if (avg > SPEAKING_THRESHOLD && avg > maxVolume) {
+            maxVolume = avg;
+            loudSpeakerId = id;
+          }
+        } catch { }
       });
+
+      const currentSpeaker = useMeetingStore.getState().activeSpeakerId;
 
       if (loudSpeakerId) {
         lastSpokeTimeRef.current = { id: loudSpeakerId, time: now };
-        if (activeSpeakerId !== loudSpeakerId) {
+        if (currentSpeaker !== loudSpeakerId) {
           setActiveSpeakerId(loudSpeakerId);
         }
       } else if (lastSpokeTimeRef.current) {
         // Keep active speaker highlighted during decay window to prevent flickering
         if (now - lastSpokeTimeRef.current.time > DECAY_MS) {
           lastSpokeTimeRef.current = null;
-          if (activeSpeakerId !== null) {
+          if (currentSpeaker !== null) {
             setActiveSpeakerId(null);
           }
         }
       }
-
-      animFrameRef.current = requestAnimationFrame(checkAudioLevels);
     };
 
-    animFrameRef.current = requestAnimationFrame(checkAudioLevels);
+    const intervalId = setInterval(checkAudioLevels, 100);
 
     return () => {
-      if (animFrameRef.current) {
-        cancelAnimationFrame(animFrameRef.current);
-      }
+      clearInterval(intervalId);
     };
-  }, [localStream, peers, currentUserId, isMuted, activeSpeakerId, setActiveSpeakerId]);
+  }, [localStream, peers, currentUserId, isMuted, setActiveSpeakerId]);
 
   // Cleanup on final hook unmount
   useEffect(() => {
@@ -184,12 +183,12 @@ export function useActiveSpeaker({
       analysersRef.current.forEach(({ source }) => {
         try {
           source.disconnect();
-        } catch {}
+        } catch { }
       });
       analysersRef.current.clear();
 
       if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current.close().catch(() => { });
         audioContextRef.current = null;
       }
     };

@@ -65,6 +65,9 @@ export function VideoTile({
       audio.srcObject = stream;
     }
 
+    audio.muted = false;
+    audio.volume = 1.0;
+
     const tryPlayAudio = () => {
       const playPromise = audio.play();
       if (playPromise && typeof playPromise.catch === "function") {
@@ -81,13 +84,14 @@ export function VideoTile({
       t.addEventListener("unmute", tryPlayAudio);
     });
 
-    // Fallback user interaction listener in case browser autoplay policy demands a gesture
+    // Fallback user interaction listener in case browser autoplay policy demands a gesture (supports mobile touchstart)
     const handleUserGesture = () => {
       if (audio && audio.paused) {
         audio.play().catch(() => {});
       }
     };
     window.addEventListener("click", handleUserGesture, { once: true });
+    window.addEventListener("touchstart", handleUserGesture, { once: true });
     window.addEventListener("keydown", handleUserGesture, { once: true });
 
     return () => {
@@ -95,6 +99,7 @@ export function VideoTile({
         t.removeEventListener("unmute", tryPlayAudio);
       });
       window.removeEventListener("click", handleUserGesture);
+      window.removeEventListener("touchstart", handleUserGesture);
       window.removeEventListener("keydown", handleUserGesture);
     };
   }, [stream, isLocal]);

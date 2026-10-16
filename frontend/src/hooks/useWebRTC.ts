@@ -52,34 +52,70 @@ const getVideoSender = (pc: RTCPeerConnection): RTCRtpSender | null => {
   return pc.getSenders().find((s) => !s.track || s.track.kind !== "audio") || null;
 };
 
-// Rebuilds and syncs active tracks from all receivers into a fresh MediaStream
+// Rebuilds and syncs active tracks from all receivers into a stable MediaStream
 const syncPeerStream = (
   pc: RTCPeerConnection,
   userId: string,
   updatePeer: (id: string, updates: Partial<VideoPeer>) => void
 ) => {
-  const freshStream = new MediaStream();
+  const currentPeer = useMeetingStore
+    .getState()
+    .peers.find((p) => String(p.userId) === String(userId));
+
+  const stream = currentPeer?.stream || new MediaStream();
+  let changed = false;
+
   pc.getReceivers().forEach((r) => {
-    if (
-      r.track &&
-      r.track.readyState !== "ended" &&
-      !freshStream.getTracks().some((t) => t.id === r.track.id)
-    ) {
-      freshStream.addTrack(r.track);
+    if (r.track && r.track.readyState !== "ended") {
+      const exists = stream.getTracks().some((t) => t.id === r.track.id);
+      if (!exists) {
+        stream.addTrack(r.track);
+        changed = true;
+      }
     }
   });
 
-  if (freshStream.getTracks().length > 0) {
-    updatePeer(userId, { stream: freshStream });
+  // Remove tracks that have ended
+  stream.getTracks().forEach((track) => {
+    const isReceiverTrack = pc
+      .getReceivers()
+      .some((r) => r.track && r.track.id === track.id && r.track.readyState !== "ended");
+    if (!isReceiverTrack) {
+      stream.removeTrack(track);
+      changed = true;
+    }
+  });
+
+  if (!currentPeer?.stream || changed) {
+    updatePeer(userId, { stream });
   }
 };
 
 export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const screenStreamRef = useRef<MediaStream | null>(null);
   // Remember camera state before screen share to restore afterwards
   const wasVideoOnRef = useRef<boolean>(true);
   const currentUserId = useAuthStore((state) => state.user?.id);
+
+  // Helper to drain buffered early ICE candidates once remote description is set
+  const drainPendingCandidates = useCallback(
+    async (peerId: string, pc: RTCPeerConnection) => {
+      const pending = pendingCandidatesRef.current.get(peerId);
+      if (pending && pending.length > 0) {
+        for (const cand of pending) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch (err) {
+            console.warn(`Error applying queued ICE candidate for peer ${peerId}:`, err);
+          }
+        }
+        pendingCandidatesRef.current.delete(peerId);
+      }
+    },
+    []
+  );
 
   const {
     localStream,
@@ -131,8 +167,19 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   // Create a new RTCPeerConnection for a peer (offerer side)
   const createPeerConnection = useCallback(
     (peerInfo: PeerInfo, stream: MediaStream) => {
-      const pc = new RTCPeerConnection(ICE_SERVERS);
       const peerId = String(peerInfo.userId);
+
+      // Cleanly close any previous connection for this peer before creating a new one
+      const existingPc = peerConnections.current.get(peerId);
+      if (existingPc) {
+        try {
+          existingPc.close();
+        } catch { }
+        peerConnections.current.delete(peerId);
+      }
+      pendingCandidatesRef.current.delete(peerId);
+
+      const pc = new RTCPeerConnection(ICE_SERVERS);
 
       // Handle audio track or transceiver
       const audioTrack = stream.getAudioTracks()[0];
@@ -303,11 +350,15 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     };
 
     const handleUserLeft = ({ userId }: { userId: any }) => {
-      const pc = peerConnections.current.get(String(userId));
+      const peerId = String(userId);
+      const pc = peerConnections.current.get(peerId);
       if (pc) {
-        pc.close();
-        peerConnections.current.delete(String(userId));
+        try {
+          pc.close();
+        } catch { }
+        peerConnections.current.delete(peerId);
       }
+      pendingCandidatesRef.current.delete(peerId);
       removePeer(userId);
     };
 
@@ -323,9 +374,19 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     }: any) => {
       if (fromUserId === currentUserId) return;
       const stream = localStream || (await startLocalStream());
+      const peerId = String(fromUserId);
+
+      // Cleanly close any previous connection for this peer before answering
+      const existingPc = peerConnections.current.get(peerId);
+      if (existingPc) {
+        try {
+          existingPc.close();
+        } catch { }
+        peerConnections.current.delete(peerId);
+      }
+      pendingCandidatesRef.current.delete(peerId);
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
-      const peerId = String(fromUserId);
 
       pc.onicecandidate = (event) => {
         if (event.candidate && socket) {
@@ -359,7 +420,10 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       // 1. Set remote description from incoming offer first so transceivers match the offer
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
 
-      // 2. Attach local tracks to the negotiated transceivers
+      // 2. Drain any early ICE candidates that arrived before remoteDescription was set
+      await drainPendingCandidates(peerId, pc);
+
+      // 3. Attach local tracks to the negotiated transceivers
       const audioTrack = stream.getAudioTracks()[0];
       const videoTrack = stream.getVideoTracks()[0];
 
@@ -378,7 +442,7 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
         }
       });
 
-      // 3. Create answer and send back
+      // 4. Create answer and send back
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
@@ -390,50 +454,43 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     };
 
     const handleAnswer = async ({ fromUserId, sdp }: any) => {
-      const pc = peerConnections.current.get(String(fromUserId));
+      const peerId = String(fromUserId);
+      const pc = peerConnections.current.get(peerId);
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        await drainPendingCandidates(peerId, pc);
         syncPeerStream(pc, fromUserId, updatePeer);
       }
     };
 
     const handleIceCandidate = async ({ fromUserId, candidate }: any) => {
-      const pc = peerConnections.current.get(String(fromUserId));
-      if (pc && candidate) {
+      if (!fromUserId || !candidate) return;
+      const peerId = String(fromUserId);
+      const pc = peerConnections.current.get(peerId);
+
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(candidate));
         } catch (err) {
-          console.error("ICE candidate error:", err);
+          console.warn("ICE candidate error:", err);
         }
+      } else {
+        // Buffer candidate until remote description is set
+        const list = pendingCandidatesRef.current.get(peerId) || [];
+        list.push(candidate);
+        pendingCandidatesRef.current.set(peerId, list);
       }
     };
 
-    // On media state change, rebuild peer stream with fresh reference
+    // On media state change, update mute/video states without destroying the active audio/video stream
     const handleMediaStateChanged = ({
       userId,
       isMuted: remoteMuted,
       isVideoOn: remoteVideoOn,
     }: any) => {
-      const uIdStr = String(userId);
-      const pc = peerConnections.current.get(uIdStr);
-
-      const freshStream = new MediaStream();
-      if (pc) {
-        pc.getReceivers().forEach((r) => {
-          if (
-            r.track &&
-            r.track.readyState !== "ended" &&
-            !freshStream.getTracks().some((t) => t.id === r.track.id)
-          ) {
-            freshStream.addTrack(r.track);
-          }
-        });
-      }
-
       updatePeer(userId, {
         isMuted: remoteMuted,
         isVideoOn: remoteVideoOn,
-        ...(freshStream.getTracks().length > 0 ? { stream: freshStream } : {}),
       });
     };
 
