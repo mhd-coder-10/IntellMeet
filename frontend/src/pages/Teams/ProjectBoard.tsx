@@ -1348,8 +1348,9 @@ export default function ProjectBoard() {
       {/* CREATE TASK MODAL */}
       {isCreateTaskOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-          <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-white p-6 sm:p-8 shadow-xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200/90 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="overflow-y-auto p-6 sm:p-8 space-y-5 flex-1 custom-modal-scroll">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
                   <Plus className="w-5 h-5" />
@@ -1519,14 +1520,16 @@ export default function ProjectBoard() {
             </form>
           </div>
         </div>
-      )}
+      </div>
+    )}
 
       {/* TASK DETAIL & COMMENTS MODAL */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/40 backdrop-blur-xs">
-          <div className="relative w-full max-w-2xl rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-7 shadow-xl border border-slate-200 space-y-5 max-h-[92vh] overflow-y-auto">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="relative w-full max-w-2xl rounded-2xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200/90 overflow-hidden flex flex-col max-h-[92vh]">
+            <div className="overflow-y-auto p-5 sm:p-7 space-y-5 flex-1 custom-modal-scroll">
+              {/* Header */}
+              <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
               <div className="space-y-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span
@@ -1879,7 +1882,8 @@ export default function ProjectBoard() {
             </div>
           </div>
         </div>
-      )}
+      </div>
+    )}
 
       {/* DELETE CONFIRM MODAL */}
       {deleteTaskId && (
