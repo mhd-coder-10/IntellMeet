@@ -18,7 +18,7 @@ const upload = multer({
 
 const uploadRecording = multer({
   storage,
-  limits: { fileSize: 250 * 1024 * 1024 }, // 250MB limit for meeting recordings
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit for meeting recordings
   fileFilter: (req, file, cb) => {
     // Allow webm, mp4, octet-stream video formats and raw recorded blobs
     if (

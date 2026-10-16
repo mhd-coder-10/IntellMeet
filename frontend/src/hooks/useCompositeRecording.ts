@@ -69,17 +69,17 @@ export interface SupportedFormat {
 }
 
 export const CANDIDATE_FORMATS: SupportedFormat[] = [
-  // 1. WebM (VP9 / Opus) - Gold standard for browser recording, hardware-accelerated, 48kHz Opus HD audio
-  {
-    mimeType: "video/webm;codecs=vp9,opus",
-    extension: "webm",
-    label: "WebM (VP9 / Opus HD)",
-  },
-  // 2. WebM (VP8 / Opus) - Universal hardware compatibility, stutter-free 30fps
+  // 1. WebM (VP8 / Opus) - Universal hardware compatibility, smooth playback across all media players and Cloudinary
   {
     mimeType: "video/webm;codecs=vp8,opus",
     extension: "webm",
     label: "WebM (VP8 / Opus HD)",
+  },
+  // 2. WebM (VP9 / Opus)
+  {
+    mimeType: "video/webm;codecs=vp9,opus",
+    extension: "webm",
+    label: "WebM (VP9 / Opus HD)",
   },
   // 3. WebM (H.264 / Opus)
   {
@@ -1060,8 +1060,8 @@ export function useCompositeRecording() {
       chunksRef.current = [];
       const recorder = new MediaRecorder(recordStream, {
         mimeType: selectedFormat.mimeType,
-        videoBitsPerSecond: 2500000, // 2.5 Mbps crisp 720p 30fps without encoder choking
-        audioBitsPerSecond: 192000, // 192 kbps studio audio
+        videoBitsPerSecond: 800000, // 800 kbps high-efficiency 720p 30fps (~6 MB/min)
+        audioBitsPerSecond: 64000, // 64 kbps crisp voice audio
       });
 
       recorder.ondataavailable = (e) => {
@@ -1270,12 +1270,14 @@ export function useCompositeRecording() {
         );
 
         let finalBlob: Blob = rawBlob;
-        // ONLY apply fixWebmDuration if format is WebM
-        if (format.extension === "webm") {
+        // ONLY apply fixWebmDuration if format is WebM and size is under 60MB
+        // to avoid locking up JavaScript UI thread and dropping WebSocket connections
+        if (format.extension === "webm" && rawBlob.size < 60 * 1024 * 1024) {
           try {
-            finalBlob = await fixWebmDuration(rawBlob, durationMs, {
+            const fixed = await fixWebmDuration(rawBlob, durationMs, {
               logger: false,
             });
+            finalBlob = new Blob([fixed], { type: actualMime });
           } catch (err) {
             console.warn("fixWebmDuration fallback to raw:", err);
             finalBlob = rawBlob;

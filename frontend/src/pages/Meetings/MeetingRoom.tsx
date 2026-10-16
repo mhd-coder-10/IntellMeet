@@ -56,7 +56,7 @@ export default function MeetingRoom() {
   const [isEndConfirmModalOpen, setIsEndConfirmModalOpen] = useState(false);
   const [remoteRecordingTime, setRemoteRecordingTime] = useState(0);
   const [remoteIsPaused, setRemoteIsPaused] = useState(false);
-  const pendingRecordingRef = useRef<RecordedResult | null>(null);
+  const pendingRecordingsRef = useRef<RecordedResult[]>([]);
   const isAutoPausedDueToEmptyRoomRef = useRef(false);
 
   const { socket, isConnected } = useSocket();
@@ -188,7 +188,6 @@ export default function MeetingRoom() {
     resumeRecording,
     clearRecordedResult,
     isRecorderActive,
-    downloadRecording,
   } = useCompositeRecording();
 
   const { isSpeaking } = useActiveSpeaker({
@@ -353,30 +352,31 @@ export default function MeetingRoom() {
         toast.info(data.message || "Meeting has been ended");
 
         const activeRecording = isRecorderActive();
-        const hasPendingRecording = !!pendingRecordingRef.current;
+        const hasPendingRecordings = pendingRecordingsRef.current.length > 0;
 
-        if (activeRecording || hasPendingRecording) {
+        if (activeRecording || hasPendingRecordings) {
           try {
-            let result = pendingRecordingRef.current;
             if (activeRecording) {
-              result = await stopRecording(true);
+              const fresh = await stopRecording(true);
+              if (fresh) {
+                pendingRecordingsRef.current.push(fresh);
+              }
             }
-            pendingRecordingRef.current = null;
+            const recordingsToSave = [...pendingRecordingsRef.current];
+            pendingRecordingsRef.current = [];
             clearRecordedResult();
-            if (result && id) {
-              const finalDuration =
-                result.duration > 0
-                  ? result.duration
-                  : recordingTime > 0
-                  ? recordingTime
-                  : 1;
-              const currentCount = meeting?.recordings?.length || 0;
-              const partNumber = currentCount + 1;
-              await uploadMeetingRecording(id, result.blob, {
-                title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
-                duration: finalDuration,
-                size: result.size,
-              });
+            if (recordingsToSave.length > 0 && id) {
+              for (let i = 0; i < recordingsToSave.length; i++) {
+                const rec = recordingsToSave[i];
+                const currentCount = meeting?.recordings?.length || 0;
+                const partNumber = currentCount + i + 1;
+                const finalDuration = rec.duration > 0 ? rec.duration : 1;
+                await uploadMeetingRecording(id, rec.blob, {
+                  title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
+                  duration: finalDuration,
+                  size: rec.size,
+                });
+              }
             }
           } catch (recErr) {
             console.error("Save recording on meeting ended error:", recErr);
@@ -466,7 +466,7 @@ export default function MeetingRoom() {
         try {
           const result = await stopRecording(true);
           if (result) {
-            pendingRecordingRef.current = result;
+            pendingRecordingsRef.current.push(result);
           }
           clearRecordedResult();
         } catch (err) {
@@ -624,44 +624,42 @@ export default function MeetingRoom() {
     }
 
     const activeRecording = isRecorderActive();
-    const hasPendingRecording = !!pendingRecordingRef.current;
+    const hasPendingRecordings = pendingRecordingsRef.current.length > 0;
 
-    if (activeRecording || hasPendingRecording) {
+    if (activeRecording || hasPendingRecordings) {
       const toastId = toast.loading("Saving meeting recording... Please wait.");
-      let result = pendingRecordingRef.current;
       try {
         if (activeRecording) {
-          result = await stopRecording(true);
+          const fresh = await stopRecording(true);
+          if (fresh) {
+            pendingRecordingsRef.current.push(fresh);
+          }
         }
-        pendingRecordingRef.current = null;
+        const recordingsToSave = [...pendingRecordingsRef.current];
+        pendingRecordingsRef.current = [];
         clearRecordedResult();
         setRecordingState(false);
         // Always emit recording stopped so remaining peers don't keep running phantom timer
         socket?.emit("meeting:recording-stopped", { meetingId: id });
-        if (result && id) {
-          const currentCount = meeting?.recordings?.length || 0;
-          const partNumber = currentCount + 1;
-          const finalDuration =
-            result.duration > 0
-              ? result.duration
-              : recordingTime > 0
-              ? recordingTime
-              : 1;
-          await uploadMeetingRecording(id, result.blob, {
-            title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
-            duration: finalDuration,
-            size: result.size,
-          });
+        if (recordingsToSave.length > 0 && id) {
+          for (let i = 0; i < recordingsToSave.length; i++) {
+            const rec = recordingsToSave[i];
+            const currentCount = meeting?.recordings?.length || 0;
+            const partNumber = currentCount + i + 1;
+            const finalDuration = rec.duration > 0 ? rec.duration : 1;
+            await uploadMeetingRecording(id, rec.blob, {
+              title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
+              duration: finalDuration,
+              size: rec.size,
+            });
+          }
           toast.success("Recording saved!", { id: toastId });
         } else {
           toast.dismiss(toastId);
         }
       } catch (err) {
         console.error("Save recording on leave error:", err);
-        toast.error("Cloud upload error. Downloading recording to your device...", { id: toastId });
-        if (result) {
-          downloadRecording(result);
-        }
+        toast.error("Failed to upload recording to cloud. Please check network.", { id: toastId });
       }
     } else {
       // Non-recording participant leaving: ONLY reset local recording state.
@@ -691,11 +689,11 @@ export default function MeetingRoom() {
 
   const handleLeave = () => {
     const activeRecording = isRecorderActive();
-    const hasPendingRecording = !!pendingRecordingRef.current;
+    const hasPendingRecordings = pendingRecordingsRef.current.length > 0;
 
     // If host has an active or pending recording and there are other participants in the room,
     // prompt host with options to avoid accidental disconnects
-    if (isHost && (activeRecording || hasPendingRecording) && peers.length > 0) {
+    if (isHost && (activeRecording || hasPendingRecordings) && peers.length > 0) {
       setIsHostLeaveWarningOpen(true);
       return;
     }
@@ -712,43 +710,41 @@ export default function MeetingRoom() {
     }
 
     const activeRecording = isRecorderActive();
-    const hasPendingRecording = !!pendingRecordingRef.current;
+    const hasPendingRecordings = pendingRecordingsRef.current.length > 0;
 
-    if (activeRecording || hasPendingRecording) {
+    if (activeRecording || hasPendingRecordings) {
       const toastId = toast.loading("Saving meeting recording... Please wait.");
-      let result = pendingRecordingRef.current;
       try {
         if (activeRecording) {
-          result = await stopRecording(true);
+          const fresh = await stopRecording(true);
+          if (fresh) {
+            pendingRecordingsRef.current.push(fresh);
+          }
         }
-        pendingRecordingRef.current = null;
+        const recordingsToSave = [...pendingRecordingsRef.current];
+        pendingRecordingsRef.current = [];
         clearRecordedResult();
         setRecordingState(false);
         socket?.emit("meeting:recording-stopped", { meetingId: id });
-        if (result && id) {
-          const currentCount = meeting?.recordings?.length || 0;
-          const partNumber = currentCount + 1;
-          const finalDuration =
-            result.duration > 0
-              ? result.duration
-              : recordingTime > 0
-              ? recordingTime
-              : 1;
-          await uploadMeetingRecording(id, result.blob, {
-            title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
-            duration: finalDuration,
-            size: result.size,
-          });
+        if (recordingsToSave.length > 0 && id) {
+          for (let i = 0; i < recordingsToSave.length; i++) {
+            const rec = recordingsToSave[i];
+            const currentCount = meeting?.recordings?.length || 0;
+            const partNumber = currentCount + i + 1;
+            const finalDuration = rec.duration > 0 ? rec.duration : 1;
+            await uploadMeetingRecording(id, rec.blob, {
+              title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
+              duration: finalDuration,
+              size: rec.size,
+            });
+          }
           toast.success("Recording saved to Meeting Details!", { id: toastId });
         } else {
           toast.dismiss(toastId);
         }
       } catch (err) {
         console.error("Auto upload recording on end:", err);
-        toast.error("Cloud upload error. Downloading recording to your device...", { id: toastId });
-        if (result) {
-          downloadRecording(result);
-        }
+        toast.error("Failed to upload recording to cloud. Please check network.", { id: toastId });
       }
     } else if (isRecording) {
       setRecordingState(false);
@@ -803,10 +799,6 @@ export default function MeetingRoom() {
     if (isRecording) {
       // Show confirmation popup: Keep Recording vs Stop Recording
       setIsStopConfirmModalOpen(true);
-    } else if (pendingRecordingRef.current) {
-      toast.info(
-        "Recording for this meeting is already completed. It will be saved automatically when the meeting ends."
-      );
     } else {
       // Open Google Meet consent confirmation modal
       setIsConsentModalOpen(true);
@@ -824,11 +816,11 @@ export default function MeetingRoom() {
     try {
       const result = await stopRecording(true);
       if (result) {
-        pendingRecordingRef.current = result;
+        pendingRecordingsRef.current.push(result);
       }
       setRecordingState(false);
       socket?.emit("meeting:recording-stopped", { meetingId: id });
-      toast.info("Recording stopped. It will be saved automatically when the meeting ends.");
+      toast.info("Recording part stopped. It will be saved automatically when the meeting ends.");
     } catch (err) {
       console.error("Stop recording error:", err);
       toast.error("Failed to stop recording");

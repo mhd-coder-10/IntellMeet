@@ -1271,44 +1271,36 @@ const uploadMeetingRecording = async (meetingId, userId, file, recordingUrl, met
   let duration = metadata.duration || 0;
 
   if (file && file.buffer) {
-    const fs = require("fs");
-    const path = require("path");
-    const uploadDir = path.join(__dirname, "../../uploads/recordings");
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    const filename = `recording-${meetingId}-${Date.now()}.webm`;
-    const filePath = path.join(uploadDir, filename);
-
-    // 1. Write file to disk immediately (takes <20ms for fast user response)
-    fs.writeFileSync(filePath, file.buffer);
-    finalUrl = `/uploads/recordings/${filename}`;
     fileSize = file.buffer.length;
 
-    // 2. Background sync to Cloudinary (non-blocking)
+    // 1. Direct Cloudinary upload when configured (fast with optimized bitrate)
     if (process.env.CLOUDINARY_API_KEY) {
-      uploadToCloudinary(file.buffer, {
-        subfolder: "recording",
-        resource_type: "video",
-      })
-        .then(async (result) => {
-          if (result?.secure_url) {
-            console.log(`[MediaStorage] Background Cloudinary sync complete for meeting ${meetingId}`);
-            const Meeting = require("../models/Meeting");
-            await Meeting.updateOne(
-              { _id: meetingId, "recordings.url": finalUrl },
-              { $set: { "recordings.$.url": result.secure_url } }
-            );
-            await meetingRepo.updateById(meetingId, { recordingUrl: result.secure_url });
-            await clearMeetingCaches(meetingId, meeting.host);
-            try {
-              if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-            } catch {}
-          }
-        })
-        .catch((err) => {
-          console.warn("[MediaStorage] Background Cloudinary sync skipped, recording safe on disk:", err.message);
+      try {
+        const result = await uploadToCloudinary(file.buffer, {
+          subfolder: "recording",
+          resource_type: "video",
         });
+        if (result?.secure_url) {
+          finalUrl = result.secure_url;
+          console.log(`[MediaStorage] Direct Cloudinary recording upload succeeded: ${finalUrl}`);
+        }
+      } catch (cErr) {
+        console.warn("[MediaStorage] Cloudinary recording upload error, fallback to disk:", cErr.message);
+      }
+    }
+
+    // 2. Fallback to local disk storage if Cloudinary not available or failed
+    if (!finalUrl || !finalUrl.startsWith("http")) {
+      const fs = require("fs");
+      const path = require("path");
+      const uploadDir = path.join(__dirname, "../../uploads/recordings");
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const filename = `recording-${meetingId}-${Date.now()}.webm`;
+      const filePath = path.join(uploadDir, filename);
+      fs.writeFileSync(filePath, file.buffer);
+      finalUrl = `/uploads/recordings/${filename}`;
     }
   }
 
