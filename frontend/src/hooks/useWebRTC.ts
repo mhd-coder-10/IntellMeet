@@ -128,30 +128,37 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     isVideoOn,
   } = useMeetingStore();
 
-  // Start local camera and microphone
+  // Start local camera and microphone with robust acoustic echo cancellation
   const startLocalStream = useCallback(async () => {
+    const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1, // Mono audio prevents stereo phase acoustic howl loops
+    };
+
     try {
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: true,
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
+          audio: AUDIO_CONSTRAINTS,
         });
       } catch {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: true,
-            audio: true,
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
           });
         } catch {
-          // If video camera permission is blocked or unavailable, gracefully fallback to audio
+          // If video camera permission is blocked or unavailable, gracefully fallback to audio with AEC
           stream = await navigator.mediaDevices.getUserMedia({
             video: false,
-            audio: true,
+            audio: AUDIO_CONSTRAINTS,
           });
           useMeetingStore.getState().setIsVideoOn(false);
         }
@@ -617,6 +624,10 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   const startScreenShare = useCallback(async () => {
     const state = useMeetingStore.getState();
     wasVideoOnRef.current = state.isVideoOn;
+
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== "function") {
+      throw new Error("Screen sharing is not supported on this mobile browser. Please use Chrome on Desktop or Android 10+.");
+    }
 
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({

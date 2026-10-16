@@ -197,12 +197,19 @@ const registerMeetingHandlers = (io, socket) => {
       const isRecordingActive = Boolean(recordingStartedAt);
       const pausedState = roomManager.getRecordingPausedState(meetingId);
 
+      // Server calculates elapsed seconds using server clock as single authoritative source
+      const serverElapsedSeconds =
+        isRecordingActive && recordingStartedAt
+          ? Math.max(0, Math.floor((Date.now() - recordingStartedAt) / 1000))
+          : 0;
+
       socket.emit("meeting:joined", {
         meetingId,
         screenSharingUserId: roomManager.getScreenSharingUser(meetingId),
         recordingUserId,
         isRecording: isRecordingActive,
         recordingStartedAt,
+        recordingElapsedSeconds: serverElapsedSeconds,
         isRecordingPaused: pausedState.isPaused,
         recordingPausedSeconds: pausedState.currentSeconds,
         users: users.map((u) => ({
@@ -222,6 +229,7 @@ const registerMeetingHandlers = (io, socket) => {
           userId: recordingUserId,
           name: "Host",
           startedAt: recordingStartedAt,
+          elapsedSeconds: serverElapsedSeconds,
           isSilent: true,
         });
         if (pausedState.isPaused) {
@@ -362,6 +370,14 @@ const registerMeetingHandlers = (io, socket) => {
     roomManager.setRecordingPaused(meetingId, false, 0);
     socket.to(meetingId).emit("meeting:recording-resumed", {
       userId: socket.user.id,
+    });
+  });
+
+  // Relay periodic recording timer synchronization to all participants in room
+  socket.on("meeting:recording-sync", ({ meetingId, currentSeconds }) => {
+    if (!meetingId || typeof currentSeconds !== "number") return;
+    socket.to(meetingId).emit("meeting:recording-sync", {
+      currentSeconds,
     });
   });
 

@@ -744,9 +744,14 @@ const deleteMeeting = async (meetingId, userId) => {
   const chatRepo = require("../repositories/chatRepository");
   await chatRepo.deleteAllByMeeting(meetingId);
 
-  // 3. Notify participants of meeting cancellation if scheduled / upcoming
+  // 3. Notify participants of meeting cancellation ONLY if scheduled / upcoming (NOT if already completed or ended)
+  const isUpcomingOrScheduled =
+    meeting.status === "scheduled" ||
+    meeting.status === "upcoming" ||
+    (!meeting.status && !meeting.actualEndTime);
+
   const participants = meeting.participants || [];
-  if (participants.length > 0) {
+  if (isUpcomingOrScheduled && participants.length > 0) {
     try {
       const emailService = require("./emailService");
       const User = require("../models/User");

@@ -20,12 +20,16 @@ const uploadRecording = multer({
   storage,
   limits: { fileSize: 250 * 1024 * 1024 }, // 250MB limit for meeting recordings
   fileFilter: (req, file, cb) => {
-    // Allow webm, mp4, octet-stream video formats
+    // Allow webm, mp4, octet-stream video formats and raw recorded blobs
     if (
+      !file.mimetype ||
+      file.mimetype === "" ||
       file.mimetype.startsWith("video/") ||
       file.mimetype === "application/octet-stream" ||
-      file.originalname.endsWith(".webm") ||
-      file.originalname.endsWith(".mp4")
+      file.mimetype.includes("webm") ||
+      file.mimetype.includes("matroska") ||
+      file.originalname?.endsWith(".webm") ||
+      file.originalname?.endsWith(".mp4")
     ) {
       cb(null, true);
     } else {

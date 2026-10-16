@@ -89,8 +89,10 @@ export const uploadMeetingRecording = async (
         payload = blobOrFormData;
     }
 
+    const isFormData = payload instanceof FormData;
     const response = await api.post(`/meetings/${id}/recording`, payload, {
-        headers: payload instanceof FormData ? { "Content-Type": "multipart/form-data" } : undefined,
+        headers: isFormData ? { "Content-Type": undefined } : undefined,
+        timeout: 180000, // 3-minute timeout for large video uploads over mobile networks
     });
     return response.data.data;
 };

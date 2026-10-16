@@ -188,6 +188,7 @@ export default function MeetingRoom() {
     resumeRecording,
     clearRecordedResult,
     isRecorderActive,
+    downloadRecording,
   } = useCompositeRecording();
 
   const { isSpeaking } = useActiveSpeaker({
@@ -216,6 +217,7 @@ export default function MeetingRoom() {
       isRecording?: boolean;
       recordingUserId?: string | null;
       recordingStartedAt?: number | null;
+      recordingElapsedSeconds?: number;
       isRecordingPaused?: boolean;
       recordingPausedSeconds?: number;
     }) => {
@@ -232,6 +234,8 @@ export default function MeetingRoom() {
         if (data.isRecordingPaused) {
           setRemoteIsPaused(true);
           setRemoteRecordingTime(data.recordingPausedSeconds || 0);
+        } else if (typeof data.recordingElapsedSeconds === "number") {
+          setRemoteRecordingTime(data.recordingElapsedSeconds);
         } else if (data.recordingStartedAt) {
           const elapsed = Math.max(0, Math.floor((Date.now() - data.recordingStartedAt) / 1000));
           setRemoteRecordingTime(elapsed);
@@ -281,6 +285,18 @@ export default function MeetingRoom() {
     }, 1000);
     return () => clearInterval(interval);
   }, [isRecording, remoteIsPaused]);
+
+  // Periodic sync of recorder's exact elapsed timer to all participants in the room
+  useEffect(() => {
+    if (!isRecorderActive() || !isRecording || !id) return;
+    const interval = setInterval(() => {
+      socket?.emit("meeting:recording-sync", {
+        meetingId: id,
+        currentSeconds: recordingTime,
+      });
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [isRecording, recordingTime, id, socket, isRecorderActive]);
 
   // Open preview modal automatically when recording finishes
   useEffect(() => {
@@ -416,17 +432,27 @@ export default function MeetingRoom() {
       userId?: string;
       name?: string;
       startedAt?: number;
+      elapsedSeconds?: number;
       isSilent?: boolean;
     }) => {
       const recorderName = data.name || "Host";
       const startTimestamp = data.startedAt || Date.now();
       setRecordingState(true, data.userId, recorderName, startTimestamp);
-      const elapsed = Math.max(0, Math.floor((Date.now() - startTimestamp) / 1000));
+      const elapsed =
+        typeof data.elapsedSeconds === "number"
+          ? data.elapsedSeconds
+          : Math.max(0, Math.floor((Date.now() - startTimestamp) / 1000));
       setRemoteRecordingTime(elapsed);
       setRemoteIsPaused(false);
       if (!data.isSilent) {
         toast.info("🔴 Recording Started by Host");
         playRecordingStartChime();
+      }
+    };
+
+    const handleRecordSync = ({ currentSeconds }: { currentSeconds?: number }) => {
+      if (typeof currentSeconds === "number" && !isRecorderActive()) {
+        setRemoteRecordingTime(currentSeconds);
       }
     };
 
@@ -560,6 +586,7 @@ export default function MeetingRoom() {
     socket.on("meeting:recording-stopped", handleRecordStop);
     socket.on("meeting:recording-paused", handleRecordPaused);
     socket.on("meeting:recording-resumed", handleRecordResumed);
+    socket.on("meeting:recording-sync", handleRecordSync);
     socket.on("meeting:user-joined", handleUserJoined);
     socket.on("meeting:user-left", handleUserLeft);
     socket.on("meeting:force-mute", handleForceMute);
@@ -572,6 +599,7 @@ export default function MeetingRoom() {
       socket.off("meeting:recording-stopped", handleRecordStop);
       socket.off("meeting:recording-paused", handleRecordPaused);
       socket.off("meeting:recording-resumed", handleRecordResumed);
+      socket.off("meeting:recording-sync", handleRecordSync);
       socket.off("meeting:user-joined", handleUserJoined);
       socket.off("meeting:user-left", handleUserLeft);
       socket.off("meeting:force-mute", handleForceMute);
@@ -600,8 +628,8 @@ export default function MeetingRoom() {
 
     if (activeRecording || hasPendingRecording) {
       const toastId = toast.loading("Saving meeting recording... Please wait.");
+      let result = pendingRecordingRef.current;
       try {
-        let result = pendingRecordingRef.current;
         if (activeRecording) {
           result = await stopRecording(true);
         }
@@ -630,7 +658,10 @@ export default function MeetingRoom() {
         }
       } catch (err) {
         console.error("Save recording on leave error:", err);
-        toast.error("Failed to save recording", { id: toastId });
+        toast.error("Cloud upload error. Downloading recording to your device...", { id: toastId });
+        if (result) {
+          downloadRecording(result);
+        }
       }
     } else {
       // Non-recording participant leaving: ONLY reset local recording state.
@@ -685,8 +716,8 @@ export default function MeetingRoom() {
 
     if (activeRecording || hasPendingRecording) {
       const toastId = toast.loading("Saving meeting recording... Please wait.");
+      let result = pendingRecordingRef.current;
       try {
-        let result = pendingRecordingRef.current;
         if (activeRecording) {
           result = await stopRecording(true);
         }
@@ -714,7 +745,10 @@ export default function MeetingRoom() {
         }
       } catch (err) {
         console.error("Auto upload recording on end:", err);
-        toast.error("Failed to save recording", { id: toastId });
+        toast.error("Cloud upload error. Downloading recording to your device...", { id: toastId });
+        if (result) {
+          downloadRecording(result);
+        }
       }
     } else if (isRecording) {
       setRecordingState(false);
@@ -753,9 +787,13 @@ export default function MeetingRoom() {
         setIsScreenSharing(true);
         setScreenSharingUserId(user?.id || "local");
         socket?.emit("meeting:screen-share-started", { meetingId: id });
-      } catch (error) {
+      } catch (error: any) {
         console.error("Screen share failed:", error);
-        toast.error("Failed to start screen sharing");
+        if (error.name === "NotAllowedError") {
+          toast.info("Screen sharing cancelled");
+        } else {
+          toast.error(error.message || "Failed to start screen sharing");
+        }
       }
     }
   };
