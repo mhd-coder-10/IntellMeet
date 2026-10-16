@@ -257,14 +257,14 @@ export default function MeetingRoom() {
     };
   }, [socket, isConnected, id, setScreenSharingUserId, setRecordingState]);
 
-  // Start local camera and microphone
+  // Start local camera and microphone immediately upon entering meeting room
   useEffect(() => {
-    if (socket && isConnected && id) {
-      startLocalStream().catch(() => {
-        toast.error("Failed to access camera and microphone");
+    if (id) {
+      startLocalStream().catch((err) => {
+        console.warn("Failed to auto-start camera and microphone:", err);
       });
     }
-  }, [socket, isConnected, id, startLocalStream]);
+  }, [id, startLocalStream]);
 
   // Remote recording timer calculation for non-host participants
   useEffect(() => {
@@ -924,13 +924,18 @@ export default function MeetingRoom() {
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col select-none">
       {/* Top Header Bar */}
-      <div className="border-b border-gray-800/80 px-6 py-3 flex items-center justify-between text-white bg-gray-900/60 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]" />
-          <h1 className="text-base font-medium text-gray-100">{meeting?.title}</h1>
+      <div className="border-b border-gray-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between text-white bg-gray-900/60 backdrop-blur-md">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)] shrink-0" />
+          <h1
+            className="text-sm sm:text-base font-semibold text-gray-100 truncate max-w-[130px] xs:max-w-[180px] sm:max-w-xs md:max-w-md"
+            title={meeting?.title}
+          >
+            {meeting?.title}
+          </h1>
         </div>
 
-        <div className="flex items-center gap-3 text-sm text-gray-400">
+        <div className="flex items-center gap-1.5 sm:gap-3 text-sm text-gray-400 shrink-0">
           {/* People / Participants Drawer Toggle Button */}
           <Button
             variant={isParticipantsOpen ? "secondary" : "ghost"}
@@ -942,18 +947,18 @@ export default function MeetingRoom() {
                 return next;
               });
             }}
-            className="text-gray-300 hover:text-white rounded-lg relative"
+            className="text-gray-300 hover:text-white rounded-lg relative px-2 sm:px-3 h-8 sm:h-9"
             title="Toggle participants list"
           >
-            <Users className="h-4 w-4 mr-1.5" />
-            People
-            <span className="ml-1.5 px-1.5 py-0.2 bg-gray-800 text-[11px] font-medium rounded-full text-gray-300 border border-gray-700/60">
+            <Users className="h-4 w-4 sm:mr-1.5" />
+            <span className="hidden sm:inline">People</span>
+            <span className="ml-1 sm:ml-1.5 px-1.5 py-0.2 bg-gray-800 text-[10px] sm:text-[11px] font-medium rounded-full text-gray-300 border border-gray-700/60">
               {peers.length + 1}
             </span>
           </Button>
 
           {meeting?.workspace && (
-            <span className="text-xs font-medium bg-gray-800/80 text-gray-300 px-2.5 py-1 rounded border border-gray-700/50">
+            <span className="hidden md:inline-flex text-xs font-medium bg-gray-800/80 text-gray-300 px-2.5 py-1 rounded border border-gray-700/50 truncate max-w-[120px]">
               {meeting.workspace.name}
             </span>
           )}
@@ -961,7 +966,7 @@ export default function MeetingRoom() {
           {/* Google Meet Recording Badge with Live Pulse & Time */}
           {isRecording && (
             <div
-              className={`flex items-center gap-2 border px-3 py-1 rounded-full text-xs font-medium shadow-sm animate-in fade-in ${
+              className={`flex items-center gap-1.5 sm:gap-2 border px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-medium shadow-sm animate-in fade-in ${
                 effectiveIsPaused
                   ? "bg-amber-500/15 border-amber-500/30 text-amber-400"
                   : "bg-red-500/15 border-red-500/30 text-red-400"
@@ -973,17 +978,17 @@ export default function MeetingRoom() {
               }
             >
               <span
-                className={`w-2 h-2 rounded-full ${
+                className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
                   effectiveIsPaused
                     ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)]"
                     : "bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"
                 }`}
               />
-              <span className="font-semibold tracking-wider">
-                {effectiveIsPaused ? "REC PAUSED" : "REC"}
+              <span className="font-semibold tracking-wider text-[10px] sm:text-xs">
+                {effectiveIsPaused ? "PAUSED" : "REC"}
               </span>
               <span
-                className={`font-mono text-white/90 text-[11px] pl-1.5 border-l ${
+                className={`font-mono text-white/90 text-[10px] sm:text-[11px] pl-1 sm:pl-1.5 border-l ${
                   effectiveIsPaused ? "border-amber-500/30" : "border-red-500/30"
                 }`}
               >
@@ -1005,12 +1010,13 @@ export default function MeetingRoom() {
                 return next;
               });
             }}
-            className="text-gray-300 hover:text-white rounded-lg relative"
+            className="text-gray-300 hover:text-white rounded-lg relative px-2 sm:px-3 h-8 sm:h-9"
+            title="Toggle in-meeting chat"
           >
-            <MessageSquare className="h-4 w-4 mr-1.5" />
-            Chat
+            <MessageSquare className="h-4 w-4 sm:mr-1.5" />
+            <span className="hidden sm:inline">Chat</span>
             {unreadCount > 0 && !isChatOpen && (
-              <span className="ml-1.5 px-1.5 py-0.5 bg-blue-600 text-[10px] font-bold rounded-full text-white shadow-sm shadow-blue-500/50 animate-pulse">
+              <span className="ml-1 sm:ml-1.5 px-1.5 py-0.5 bg-blue-600 text-[10px] font-bold rounded-full text-white shadow-sm shadow-blue-500/50 animate-pulse">
                 {unreadCount}
               </span>
             )}

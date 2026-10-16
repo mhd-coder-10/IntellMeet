@@ -11,6 +11,10 @@ const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" },
+    { urls: "stun:stun.services.mozilla.com" },
   ],
 };
 
@@ -102,10 +106,19 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
           },
         });
       } catch {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+        } catch {
+          // If video camera permission is blocked or unavailable, gracefully fallback to audio
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: false,
+            audio: true,
+          });
+          useMeetingStore.getState().setIsVideoOn(false);
+        }
       }
       setLocalStream(stream);
       return stream;

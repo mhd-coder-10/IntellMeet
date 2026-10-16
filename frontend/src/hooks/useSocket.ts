@@ -5,8 +5,17 @@ import { useEffect, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { useAuthStore } from "@/store/authStore";
 
-const SOCKET_URL =
-  import.meta.env.VITE_SOCKET_URL || "http://localhost:5100";
+const deriveSocketUrl = () => {
+  if (import.meta.env.VITE_SOCKET_URL) {
+    return import.meta.env.VITE_SOCKET_URL;
+  }
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL.replace(/\/api\/?$/, "");
+  }
+  return "http://localhost:5100";
+};
+
+const SOCKET_URL = deriveSocketUrl();
 
 export function useSocket() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -26,7 +35,7 @@ export function useSocket() {
       withCredentials: true, // Send HttpOnly cookie with WebSocket handshake
       transports: ["websocket", "polling"],
       reconnection: true,
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 30,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
     });

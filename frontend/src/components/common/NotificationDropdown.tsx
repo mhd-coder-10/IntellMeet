@@ -125,8 +125,8 @@ export function NotificationDropdown() {
   const { data, refetch } = useQuery({
     queryKey: ["notifications"],
     queryFn: () => getNotifications(40),
-    staleTime: 10 * 1000,
-    refetchInterval: 30 * 1000,
+    staleTime: 5 * 1000,
+    refetchInterval: 10 * 1000,
   });
 
   const notifications = data?.notifications || [];
@@ -485,7 +485,7 @@ export function NotificationDropdown() {
                               e.stopPropagation();
                               deleteSingleMutation.mutate(notif._id);
                             }}
-                            className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition cursor-pointer"
+                            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition cursor-pointer"
                             title="Delete notification"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
