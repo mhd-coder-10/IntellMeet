@@ -38,6 +38,9 @@ const getTransporter = async () => {
         user: smtpUser,
         pass: smtpPass,
       },
+      connectionTimeout: 6000,
+      greetingTimeout: 6000,
+      socketTimeout: 7000,
     });
     console.log(`[Email Service] Transporter initialized with SMTP host: ${smtpHost} (${smtpUser})`);
   } else if (smtpUser && smtpPass) {
@@ -50,6 +53,9 @@ const getTransporter = async () => {
           user: smtpUser,
           pass: smtpPass,
         },
+        connectionTimeout: 6000,
+        greetingTimeout: 6000,
+        socketTimeout: 7000,
       });
       console.log(`[Email Service] Transporter initialized with service: ${service} (${smtpUser})`);
     } else {
@@ -61,6 +67,9 @@ const getTransporter = async () => {
           user: smtpUser,
           pass: smtpPass,
         },
+        connectionTimeout: 6000,
+        greetingTimeout: 6000,
+        socketTimeout: 7000,
       });
       console.log(`[Email Service] Transporter initialized with smtp.gmail.com (${smtpUser})`);
     }
@@ -714,12 +723,17 @@ const sendSignupOtpEmail = async ({
     </html>
     `;
 
-    await t.sendMail({
-      from: fromAddress,
-      to: recipientEmail,
-      subject: `🔐 Your IntellMeet Verification Code: ${otp}`,
-      html,
-    });
+    await Promise.race([
+      t.sendMail({
+        from: fromAddress,
+        to: recipientEmail,
+        subject: `🔐 Your IntellMeet Verification Code: ${otp}`,
+        html,
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Email server connection timed out")), 6000)
+      ),
+    ]);
 
     console.log(`[Email Service] Signup OTP sent to ${recipientEmail}`);
   } catch (err) {

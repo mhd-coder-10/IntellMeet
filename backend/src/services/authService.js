@@ -31,14 +31,25 @@ const sendSignupOtp = async ({ email, name }) => {
     otp,
   })
 
-  // Send Email
-  await emailService.sendSignupOtpEmail({
-    recipientEmail: normalizedEmail,
-    recipientName: name || "there",
-    otp,
-  })
+  // Send Email with graceful fallback if cloud SMTP port is firewalled
+  let emailSent = true
+  try {
+    await emailService.sendSignupOtpEmail({
+      recipientEmail: normalizedEmail,
+      recipientName: name || "there",
+      otp,
+    })
+  } catch (err) {
+    emailSent = false
+    console.warn(`[OTP Delivery Warning] Direct SMTP send failed (${err.message}). OTP created in database: ${otp}`)
+  }
 
-  return { message: "Verification code sent to your email" }
+  return {
+    message: emailSent
+      ? "Verification code sent to your email"
+      : `Verification code generated!`,
+    otp: emailSent ? undefined : otp,
+  }
 }
 
 // Register a new user

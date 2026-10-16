@@ -2,7 +2,7 @@
 // Automatically expands when hovered and collapses when cursor leaves.
 // Adjusts the page content smoothly without cutting off any elements.
 
-import { useLocation, Link } from "react-router-dom";
+import { useLocation, Link, useNavigate } from "react-router-dom";
 import {
   Home,
   Video,
@@ -15,14 +15,19 @@ import {
   ChevronRight,
   Sparkles,
   X,
+  LogOut,
 } from "lucide-react";
+import { toast } from "sonner";
 import { useSidebarStore } from "@/store/sidebarStore";
 import { useAuthStore } from "@/store/authStore";
+import { logout as logoutApi } from "@/services/authService";
 import { Button } from "@/components/ui/button";
 
 export function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const clearAuth = useAuthStore((state) => state.clearAuth);
   const {
     isOpen,
     isPinned,
@@ -31,6 +36,18 @@ export function Sidebar() {
     togglePin,
     closeMobile,
   } = useSidebarStore();
+
+  const handleLogout = async () => {
+    closeMobile();
+    try {
+      await logoutApi();
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
+    clearAuth();
+    toast.success("Logged out successfully");
+    navigate("/login");
+  };
 
   const navLinks = [
     { to: "/dashboard", label: "Dashboard", icon: Home, badge: null },
@@ -86,7 +103,7 @@ export function Sidebar() {
             setHovered(false);
           }
         }}
-        className={`fixed top-16 left-0 bottom-0 w-64 max-w-[80vw] bg-white/95 backdrop-blur-md border-r border-slate-200/90 z-50 flex flex-col justify-between shadow-2xl md:shadow-md transition-all duration-300 ease-in-out ${
+        className={`fixed top-0 md:top-16 left-0 bottom-0 w-64 max-w-[80vw] bg-white/95 backdrop-blur-md border-r border-slate-200/90 z-50 flex flex-col justify-between shadow-2xl md:shadow-md transition-all duration-300 ease-in-out ${
           isMobileOpen
             ? "translate-x-0 opacity-100 pointer-events-auto"
             : isOpen
@@ -96,11 +113,22 @@ export function Sidebar() {
       >
         {/* Top Header Section */}
         <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Workspace Menu
-            </span>
+          <div className="flex items-center gap-2.5">
+            {/* Mobile Brand Logo */}
+            <div className="md:hidden w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-xs">
+              <Video className="w-4 h-4" />
+            </div>
+            <div className="flex flex-col">
+              <span className="md:hidden text-sm font-bold text-slate-900 tracking-tight leading-tight">
+                Intell<span className="text-blue-600">Meet</span>
+              </span>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Workspace Menu
+                </span>
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-1">
@@ -122,7 +150,7 @@ export function Sidebar() {
             <button
               type="button"
               onClick={closeMobile}
-              className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -172,39 +200,54 @@ export function Sidebar() {
         </div>
 
         {/* Bottom Quick Action Card & User Info */}
-        <div className="p-3 border-t border-slate-100 space-y-2.5 bg-slate-50/50">
+        <div className="p-3 border-t border-slate-100 space-y-2 bg-slate-50/50">
           <Link to="/meetings/create" onClick={closeMobile} className="block">
             <Button
               size="sm"
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs h-9 font-semibold shadow-xs gap-1.5"
+              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs h-9 font-semibold shadow-xs gap-1.5 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>Instant Meeting</span>
             </Button>
           </Link>
 
-          {/* User mini badge */}
+          {/* User mini badge & Mobile Logout */}
           {user && (
-            <div className="flex items-center gap-2.5 p-2 rounded-xl bg-white border border-slate-200/70 shadow-2xs">
-              <div className="w-7 h-7 rounded-lg overflow-hidden bg-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                {user.profilePicture ? (
-                  <img
-                    src={user.profilePicture}
-                    alt={user.name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span>{(user.name || "U")[0]}</span>
-                )}
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between p-2 rounded-xl bg-white border border-slate-200/70 shadow-2xs">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-7 h-7 rounded-lg overflow-hidden bg-gradient-to-tr from-blue-600 to-purple-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                    {user.profilePicture ? (
+                      <img
+                        src={user.profilePicture}
+                        alt={user.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span>{(user.name || "U")[0]}</span>
+                    )}
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-bold text-slate-900 truncate leading-tight">
+                      {user.name}
+                    </span>
+                    <span className="text-[10px] text-slate-400 truncate leading-tight">
+                      @{user.username}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-xs font-bold text-slate-900 truncate leading-tight">
-                  {user.name}
-                </span>
-                <span className="text-[10px] text-slate-400 truncate leading-tight">
-                  @{user.username}
-                </span>
-              </div>
+
+              {/* Explicit Mobile Logout Button */}
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 border border-red-200/80 transition cursor-pointer"
+                title="Log out of your account"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Log Out</span>
+              </button>
             </div>
           )}
         </div>

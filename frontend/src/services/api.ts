@@ -8,6 +8,7 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "http://localhost:5100/api",
   headers: { "Content-Type": "application/json" },
   withCredentials: true, // Automatically sends and receives HttpOnly cookies
+  timeout: 25000, // Prevent hanging requests indefinitely
 });
 
 // Attach memory access token if present as dual-compatibility fallback

@@ -52,14 +52,33 @@ export function LoginForm() {
         }
     }
 
+    const handleFormSubmit = (e: React.FormEvent) => {
+        // Prevents browser autofill from auto-submitting without user button click
+        e.preventDefault()
+    }
+
+    const handleManualSubmit = () => {
+        handleSubmit(onSubmit)()
+    }
+
     return (
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <form
+            onSubmit={handleFormSubmit}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault()
+                    handleManualSubmit()
+                }
+            }}
+            className="space-y-4"
+        >
             <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
                     id="email"
                     type="email"
                     placeholder="you@example.com"
+                    autoComplete="email"
                     {...register('email')}
                 />
                 {errors.email && (
@@ -74,6 +93,7 @@ export function LoginForm() {
                         id="password"
                         type={showPassword ? 'text' : 'password'}
                         placeholder="Enter your password"
+                        autoComplete="current-password"
                         className="pr-10"
                         {...register('password')}
                     />
@@ -96,7 +116,12 @@ export function LoginForm() {
                 )}
             </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button
+                type="button"
+                onClick={handleManualSubmit}
+                className="w-full cursor-pointer"
+                disabled={isLoading}
+            >
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {isLoading ? 'Logging in...' : 'Login'}
             </Button>

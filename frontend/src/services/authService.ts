@@ -15,7 +15,7 @@ export const login = async (payload: LoginPayload): Promise<AuthResponse> => {
   return response.data.data
 }
 
-export const sendSignupOtp = async (payload: { email: string; name?: string }): Promise<{ message: string }> => {
+export const sendSignupOtp = async (payload: { email: string; name?: string }): Promise<{ message: string; otp?: string; data?: { message?: string; otp?: string } }> => {
   const response = await api.post('/auth/send-signup-otp', payload)
   return response.data
 }

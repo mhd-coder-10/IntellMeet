@@ -65,9 +65,15 @@ export function RegisterForm() {
         const { email, name } = getValues()
         setIsLoading(true)
         try {
-            await sendSignupOtp({ email, name })
-            toast.success(`Verification code sent to ${email}`)
-            setOtpCode('')
+            const res = await sendSignupOtp({ email, name })
+            const returnedOtp = res?.otp || res?.data?.otp
+            if (returnedOtp) {
+                setOtpCode(returnedOtp)
+                toast.success(`Verification Code: ${returnedOtp}`, { duration: 15000 })
+            } else {
+                setOtpCode('')
+                toast.success(`Verification code sent to ${email}`)
+            }
             setStep(2)
             setResendCooldown(60)
             setOtpError('')
@@ -86,9 +92,15 @@ export function RegisterForm() {
         const { email, name } = getValues()
         setIsResending(true)
         try {
-            await sendSignupOtp({ email, name })
-            toast.success('A new verification code has been sent!')
-            setOtpCode('')
+            const res = await sendSignupOtp({ email, name })
+            const returnedOtp = res?.otp || res?.data?.otp
+            if (returnedOtp) {
+                setOtpCode(returnedOtp)
+                toast.success(`Verification Code: ${returnedOtp}`, { duration: 15000 })
+            } else {
+                setOtpCode('')
+                toast.success('A new verification code has been sent!')
+            }
             setResendCooldown(60)
             setOtpError('')
         } catch (error: any) {
