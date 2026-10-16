@@ -23,6 +23,19 @@ const getRoom = (meetingId) => {
   return activeRooms.get(meetingId);
 };
 
+const { setActiveMeetings, setActiveParticipants } = require("../config/metrics");
+
+const updateMetrics = () => {
+  try {
+    setActiveMeetings(activeRooms.size);
+    let totalParticipants = 0;
+    activeRooms.forEach((r) => {
+      totalParticipants += r.users?.size || 0;
+    });
+    setActiveParticipants(totalParticipants);
+  } catch {}
+};
+
 // Add a user to a room
 const addUserToRoom = (meetingId, userId, socketId, userInfo) => {
   const room = createRoom(meetingId);
@@ -36,6 +49,7 @@ const addUserToRoom = (meetingId, userId, socketId, userInfo) => {
     isVideoOn: true,
     isScreenSharing: false,
   });
+  updateMetrics();
   return room;
 };
 
@@ -71,12 +85,15 @@ const removeUserFromRoom = (meetingId, userId) => {
   if (remainingCount === 0) {
     activeRooms.delete(meetingId);
   }
+  updateMetrics();
   return { room, wasScreenSharing, wasRecording, remainingCount };
 };
 
 // Clear a room entirely
 const clearRoom = (meetingId) => {
-  return activeRooms.delete(meetingId);
+  const result = activeRooms.delete(meetingId);
+  updateMetrics();
+  return result;
 };
 
 // Get all users in a room

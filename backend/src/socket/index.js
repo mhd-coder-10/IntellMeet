@@ -9,6 +9,8 @@ const { registerNotificationHandlers } = require("./notificationSocket")
 const { registerSignalingHandlers } = require("./webrtcSignaling")
 const { registerTeamHandlers } = require("./teamSocket")
 
+const { incActiveSockets, decActiveSockets } = require("../config/metrics");
+
 let ioInstance = null
 
 const initSocket = (httpServer) => {
@@ -23,6 +25,7 @@ const initSocket = (httpServer) => {
   io.use(socketAuth)
 
   io.on("connection", (socket) => {
+    incActiveSockets();
     console.log(`User connected: ${socket.user.username} (${socket.id})`)
 
     registerMeetingHandlers(io, socket)
@@ -32,6 +35,7 @@ const initSocket = (httpServer) => {
     registerTeamHandlers(io, socket)
 
     socket.on("disconnect", () => {
+      decActiveSockets();
       console.log(`User disconnected: ${socket.user.username}`)
     })
   })

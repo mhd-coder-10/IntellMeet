@@ -44,8 +44,17 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(morgan("dev"));
 
+const { metricsMiddleware, metricsEndpointHandler } = require("./config/metrics");
+const { sentryErrorHandler } = require("./config/sentry");
+
+app.use(metricsMiddleware);
+
 // Swagger docs
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// Prometheus Metrics Scrape Endpoint
+app.get("/metrics", metricsEndpointHandler);
+app.get("/api/metrics", metricsEndpointHandler);
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -56,9 +65,10 @@ app.get("/api/health", (req, res) => {
   })
 });
 
-
 // Mount all API routes
 app.use('/api', routes);
 
+// Sentry Error Handler
+app.use(sentryErrorHandler);
 
 module.exports = app;
