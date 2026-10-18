@@ -6,6 +6,10 @@ const Summary = require("../models/Summary");
 const ActionItem = require("../models/ActionItem");
 const Meeting = require("../models/Meeting");
 const Transcript = require("../models/Transcript");
+require("../models/Task");
+require("../models/Project");
+require("../models/Team");
+require("../models/User");
 const transcriptionService = require("./transcriptionService");
 
 /**
@@ -119,10 +123,11 @@ Respond STRICTLY with valid JSON matching this schema:
   }
 
   const candidateModels = [
-    "gemini-2.5-flash",
-    "gemini-flash-latest",
-    "gemini-3.7-flash",
     "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
   ];
   let rawResponse = null;
   let lastError = null;

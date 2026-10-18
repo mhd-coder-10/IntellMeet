@@ -38,7 +38,9 @@ export const generateMeetingTranscript = async (
   meetingId: string,
   payload: GenerateTranscriptPayload = {}
 ): Promise<MeetingTranscript> => {
-  const response = await api.post(`/ai/meetings/${meetingId}/transcript/generate`, payload);
+  const response = await api.post(`/ai/meetings/${meetingId}/transcript/generate`, payload, {
+    timeout: 180000, // 3-minute timeout for multi-minute audio transcription
+  });
   return response.data.data.transcript;
 };
 
@@ -108,7 +110,9 @@ export const generateMeetingSummary = async (
   meetingId: string,
   payload: GenerateSummaryPayload = {}
 ): Promise<MeetingSummaryResponse> => {
-  const response = await api.post(`/ai/meetings/${meetingId}/summary/generate`, payload);
+  const response = await api.post(`/ai/meetings/${meetingId}/summary/generate`, payload, {
+    timeout: 180000, // 3-minute timeout for AI summary generation
+  });
   return response.data.data;
 };
 
