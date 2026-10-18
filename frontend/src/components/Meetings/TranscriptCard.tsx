@@ -45,6 +45,37 @@ const formatSeconds = (sec: number) => {
   return `${m}:${s}`;
 };
 
+// Safely highlights search keywords within text
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  if (!query?.trim() || !text) return <>{text}</>;
+
+  try {
+    const cleanQuery = query.trim();
+    const escaped = cleanQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`(${escaped})`, "gi");
+    const parts = text.split(regex);
+
+    return (
+      <>
+        {parts.map((part, i) =>
+          part.toLowerCase() === cleanQuery.toLowerCase() ? (
+            <mark
+              key={i}
+              className="bg-amber-200 text-amber-950 font-semibold px-0.5 rounded shadow-2xs"
+            >
+              {part}
+            </mark>
+          ) : (
+            part
+          )
+        )}
+      </>
+    );
+  } catch {
+    return <>{text}</>;
+  }
+}
+
 export function TranscriptCard({
   meetingId,
   meetingTitle = "Meeting",
@@ -125,18 +156,35 @@ export function TranscriptCard({
     }
   };
 
-  // Filter segments by search query
+  // Filter segments by search query (supports multiple words, phrases, and partial matches)
   const filteredSegments = useMemo(() => {
     if (!transcript?.segments) return [];
     if (!searchQuery.trim()) return transcript.segments;
 
-    const q = searchQuery.toLowerCase().trim();
-    return transcript.segments.filter(
-      (s) =>
-        s.text.toLowerCase().includes(q) ||
-        s.speaker.toLowerCase().includes(q)
-    );
+    const rawQ = searchQuery.toLowerCase().trim();
+    const queryTerms = rawQ.split(/\s+/).filter(Boolean);
+
+    return transcript.segments.filter((s) => {
+      const text = (s.text || "").toLowerCase();
+      const speaker = (s.speaker || "").toLowerCase();
+      const combined = `${speaker} ${text}`;
+
+      if (combined.includes(rawQ)) return true;
+      return queryTerms.every((term) => combined.includes(term));
+    });
   }, [transcript?.segments, searchQuery]);
+
+  // Full text match count
+  const textMatchCount = useMemo(() => {
+    if (!transcript?.fullText || !searchQuery.trim()) return 0;
+    try {
+      const escaped = searchQuery.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const matches = transcript.fullText.match(new RegExp(escaped, "gi"));
+      return matches ? matches.length : 0;
+    } catch {
+      return 0;
+    }
+  }, [transcript?.fullText, searchQuery]);
 
   // Provider label formatter (generic enterprise AI branding)
   const providerLabel = useMemo(() => {
@@ -356,23 +404,25 @@ export function TranscriptCard({
               <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
                 <button
                   onClick={() => setViewMode("segments")}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition ${viewMode === "segments"
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition ${
+                    viewMode === "segments"
                       ? "bg-white text-slate-900 shadow-xs"
                       : "text-slate-600 hover:text-slate-900"
-                    }`}
+                  }`}
                 >
                   <ListFilter className="w-3 h-3" />
-                  Dialogue Turns ({filteredSegments.length})
+                  Dialogue Turns ({filteredSegments.length}{searchQuery.trim() ? ` / ${transcript.segments?.length || 0}` : ""})
                 </button>
                 <button
                   onClick={() => setViewMode("text")}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition ${viewMode === "text"
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition ${
+                    viewMode === "text"
                       ? "bg-white text-slate-900 shadow-xs"
                       : "text-slate-600 hover:text-slate-900"
-                    }`}
+                  }`}
                 >
                   <AlignLeft className="w-3 h-3" />
-                  Full Text
+                  Full Text {searchQuery.trim() ? `(${textMatchCount})` : ""}
                 </button>
               </div>
             </div>
@@ -381,21 +431,35 @@ export function TranscriptCard({
             {viewMode === "segments" && (
               <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
                 {filteredSegments.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-slate-500 space-y-2.5">
-                    <p>
+                  <div className="py-8 text-center text-xs text-slate-500 space-y-3">
+                    <div className="w-9 h-9 mx-auto rounded-xl bg-slate-100 flex items-center justify-center text-slate-400">
+                      <Search className="w-4 h-4" />
+                    </div>
+                    <p className="text-slate-600 font-medium">
                       {searchQuery
-                        ? `No transcript segments match "${searchQuery}"`
-                        : "No audible speech dialogue detected in this recording (low audio or background noise)."}
+                        ? `No dialogue segments match "${searchQuery}"`
+                        : "No audible speech dialogue detected in this recording."}
                     </p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => generateMutation.mutate()}
-                      disabled={generateMutation.isPending}
-                      className="text-xs h-7 px-3 rounded-lg border-slate-300"
-                    >
-                      {generateMutation.isPending ? "Retrying..." : "Retry Transcription"}
-                    </Button>
+                    {searchQuery ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setSearchQuery("")}
+                        className="text-xs h-7 px-3 rounded-lg border-slate-300 gap-1.5"
+                      >
+                        Clear Search Filter
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => generateMutation.mutate()}
+                        disabled={generateMutation.isPending}
+                        className="text-xs h-7 px-3 rounded-lg border-slate-300"
+                      >
+                        {generateMutation.isPending ? "Retrying..." : "Retry Transcription"}
+                      </Button>
+                    )}
                   </div>
                 ) : (
                   filteredSegments.map((segment: TranscriptSegment) => (
@@ -413,7 +477,7 @@ export function TranscriptCard({
                         <div className="flex items-center justify-between gap-2 mb-1">
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-xs text-slate-800">
-                              {segment.speaker}
+                              <HighlightedText text={segment.speaker || "Participant"} query={searchQuery} />
                             </span>
                             {segment.confidence && segment.confidence >= 0.9 && (
                               <span className="text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded font-medium">
@@ -434,9 +498,9 @@ export function TranscriptCard({
                           </button>
                         </div>
 
-                        {/* Spoken text */}
+                        {/* Spoken text with highlighting */}
                         <p className="text-xs text-slate-700 leading-relaxed font-normal">
-                          {segment.text}
+                          <HighlightedText text={segment.text} query={searchQuery} />
                         </p>
                       </div>
                     </div>
@@ -447,8 +511,27 @@ export function TranscriptCard({
 
             {/* View Mode 2: Clean Full Text */}
             {viewMode === "text" && (
-              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 font-mono text-xs text-slate-800 leading-relaxed max-h-[460px] overflow-y-auto whitespace-pre-wrap select-text">
-                {transcript.fullText || "No full text available"}
+              <div className="space-y-2">
+                {searchQuery.trim() && (
+                  <div className="flex items-center justify-between text-[11px] px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200/70 text-amber-900">
+                    <span>
+                      {textMatchCount > 0 ? (
+                        <>Found <strong>{textMatchCount}</strong> match{textMatchCount > 1 ? "es" : ""} for &ldquo;{searchQuery}&rdquo;</>
+                      ) : (
+                        <>No matches found for &ldquo;{searchQuery}&rdquo; in full text</>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => setSearchQuery("")}
+                      className="text-amber-800 hover:text-amber-950 font-medium underline"
+                    >
+                      Clear Search
+                    </button>
+                  </div>
+                )}
+                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 font-mono text-xs text-slate-800 leading-relaxed max-h-[460px] overflow-y-auto whitespace-pre-wrap select-text">
+                  <HighlightedText text={transcript.fullText || "No full text available"} query={searchQuery} />
+                </div>
               </div>
             )}
           </div>
