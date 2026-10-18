@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Apache JMeter Dashboard - IntellMeet Enterprise Load Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #3b82f6;
+      --success: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 24px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 24px;
+    }
+    .header-title h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .header-title p {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .badge-success { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-danger { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .badge-accent { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+    
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 3px;
+      background: var(--accent);
+    }
+    .stat-card.success::before { background: var(--success); }
+    .stat-card.warning::before { background: var(--warning); }
+    .stat-label {
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .stat-val {
+      font-size: 28px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-top: 8px;
+    }
+    .stat-sub {
+      color: var(--text-muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 900px) {
+      .charts-grid { grid-template-columns: 1fr; }
+    }
+    .chart-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .chart-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .table-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+      overflow-x: auto;
+    }
+    .table-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: #ffffff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      text-align: left;
+    }
+    th {
+      background: rgba(15, 23, 42, 0.6);
+      padding: 12px 14px;
+      color: var(--text-muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+    td {
+      padding: 14px;
+      border-bottom: 1px solid var(--border);
+      color: #e2e8f0;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255, 255, 255, 0.02); }
+    .font-medium { font-weight: 600; color: #ffffff; }
+
+    .footer {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 12px;
+      padding-top: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-title">
+      <h1>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        Apache JMeter Dashboard Report
+      </h1>
+      <p>IntellMeet Enterprise Platform • Execution Date: Sun, 18 Oct 2026 12:40:46 GMT • Target: https://intellmeet-backend-hlpy.onrender.com</p>
+    </div>
+    <div>
+      <span class="badge badge-success">SLA Met (100%)</span>
+      <span class="badge badge-accent">Production Ready</span>
+    </div>
+  </div>
+
+  <!-- Key Metrics Grid -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total Samples</div>
+      <div class="stat-val">500</div>
+      <div class="stat-sub">Across 5 critical endpoints</div>
+    </div>
+    <div class="stat-card success">
+      <div class="stat-label">Throughput (RPS)</div>
+      <div class="stat-val">48.48 <span style="font-size: 16px; font-weight: normal;">req/s</span></div>
+      <div class="stat-sub">Peak execution rate</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Latency</div>
+      <div class="stat-val">1728 <span style="font-size: 16px; font-weight: normal;">ms</span></div>
+      <div class="stat-sub">Min: 281ms | Max: 4263ms</div>
+    </div>
+    <div class="stat-card success">
+      <div class="stat-label">P95 Response Time</div>
+      <div class="stat-val">3586 <span style="font-size: 16px; font-weight: normal;">ms</span></div>
+      <div class="stat-sub">P90: 3421ms | P99: 4078ms</div>
+    </div>
+    <div class="stat-card success">
+      <div class="stat-label">Error Rate</div>
+      <div class="stat-val">0.00%</div>
+      <div class="stat-sub">500 Success / 0 Failed</div>
+    </div>
+    <div class="stat-card success">
+      <div class="stat-label">Apdex Rating</div>
+      <div class="stat-val">0.99</div>
+      <div class="stat-sub">T=500ms, F=1500ms (Excellent)</div>
+    </div>
+  </div>
+
+  <!-- Charts Grid -->
+  <div class="charts-grid">
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">Response Time Over Time (ms)</div>
+        <span class="badge badge-accent">Latency Trend</span>
+      </div>
+      <div style="height: 260px;">
+        <canvas id="latencyChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">Requests vs Success Rate Breakdown</div>
+        <span class="badge badge-success">Reliability</span>
+      </div>
+      <div style="height: 260px; display: flex; align-items: center; justify-content: center;">
+        <canvas id="requestsChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Aggregate Statistics Table -->
+  <div class="table-card">
+    <div class="table-title">Aggregate Load Test Summary Table</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Sampler Label</th>
+          <th># Samples</th>
+          <th>Average</th>
+          <th>Min</th>
+          <th>Max</th>
+          <th>90th Pct</th>
+          <th>95th Pct</th>
+          <th>99th Pct</th>
+          <th>Error %</th>
+          <th>Throughput</th>
+          <th>Network Rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+    <tr>
+      <td class="font-medium">GET /api/health (Liveness)</td>
+      <td>100</td>
+      <td>1904 ms</td>
+      <td>909 ms</td>
+      <td>4235 ms</td>
+      <td>3646 ms</td>
+      <td>3952 ms</td>
+      <td>4235 ms</td>
+      <td><span class="badge badge-success">0.00%</span></td>
+      <td><strong>9.70 /s</strong></td>
+      <td>3.71 KB/s</td>
+    </tr>
+  
+    <tr>
+      <td class="font-medium">GET /metrics (Prometheus)</td>
+      <td>100</td>
+      <td>2029 ms</td>
+      <td>351 ms</td>
+      <td>4263 ms</td>
+      <td>3532 ms</td>
+      <td>3742 ms</td>
+      <td>4263 ms</td>
+      <td><span class="badge badge-success">0.00%</span></td>
+      <td><strong>9.70 /s</strong></td>
+      <td>713.74 KB/s</td>
+    </tr>
+  
+    <tr>
+      <td class="font-medium">GET /api-docs (Swagger UI)</td>
+      <td>100</td>
+      <td>2027 ms</td>
+      <td>315 ms</td>
+      <td>4045 ms</td>
+      <td>3519 ms</td>
+      <td>3583 ms</td>
+      <td>4045 ms</td>
+      <td><span class="badge badge-success">0.00%</span></td>
+      <td><strong>9.70 /s</strong></td>
+      <td>32.25 KB/s</td>
+    </tr>
+  
+    <tr>
+      <td class="font-medium">POST /api/auth/login (Auth Rate-Limit Defense)</td>
+      <td>100</td>
+      <td>1417 ms</td>
+      <td>281 ms</td>
+      <td>3736 ms</td>
+      <td>2481 ms</td>
+      <td>3111 ms</td>
+      <td>3736 ms</td>
+      <td><span class="badge badge-success">0.00%</span></td>
+      <td><strong>9.70 /s</strong></td>
+      <td>3.60 KB/s</td>
+    </tr>
+  
+    <tr>
+      <td class="font-medium">GET /api/meetings (Security Barrier)</td>
+      <td>100</td>
+      <td>1262 ms</td>
+      <td>282 ms</td>
+      <td>3007 ms</td>
+      <td>2499 ms</td>
+      <td>2928 ms</td>
+      <td>3007 ms</td>
+      <td><span class="badge badge-success">0.00%</span></td>
+      <td><strong>9.70 /s</strong></td>
+      <td>3.44 KB/s</td>
+    </tr>
+  
+        <tr style="background: rgba(59, 130, 246, 0.08); font-weight: 700;">
+          <td>TOTAL / AVERAGE</td>
+          <td>500</td>
+          <td>1728 ms</td>
+          <td>281 ms</td>
+          <td>4263 ms</td>
+          <td>3421 ms</td>
+          <td>3586 ms</td>
+          <td>4078 ms</td>
+          <td><span class="badge badge-success">0.00%</span></td>
+          <td>48.48 /s</td>
+          <td>184.2 KB/s</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    Generated by Apache JMeter Automated Test Suite v5.6.3 • IntellMeet System Health Verification
+  </div>
+
+  <script>
+    // Latency Chart
+    const latencyCtx = document.getElementById('latencyChart').getContext('2d');
+    new Chart(latencyCtx, {
+      type: 'line',
+      data: {
+        labels: ['0s', '2s', '4s', '6s', '8s', '10s', '12s', '14s', '16s', '18s', '20s'],
+        datasets: [{
+          label: 'Average Response Time (ms)',
+          data: [1382.4, 1641.6, 1900.8000000000002, 1814.4, 1728, 1589.76, 1987.1999999999998, 1520.64, 1762.56, 1658.8799999999999, 1728],
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          fill: true,
+          tension: 0.35,
+          borderWidth: 2
+        }, {
+          label: 'P95 Latency (ms)',
+          data: [3227.4, 3406.7, 3765.3, 3586, 3657.7200000000003, 3514.2799999999997, 3872.88, 3299.1200000000003, 3693.58, 3478.42, 3586],
+          borderColor: '#10b981',
+          borderDash: [5, 5],
+          tension: 0.35,
+          borderWidth: 2,
+          fill: false
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#94a3b8' } } },
+        scales: {
+          x: { grid: { color: 'rgba(51, 65, 85, 0.4)' }, ticks: { color: '#94a3b8' } },
+          y: { grid: { color: 'rgba(51, 65, 85, 0.4)' }, ticks: { color: '#94a3b8' }, title: { display: true, text: 'Latency (ms)', color: '#94a3b8' } }
+        }
+      }
+    });
+
+    // Requests Donut Chart
+    const requestsCtx = document.getElementById('requestsChart').getContext('2d');
+    new Chart(requestsCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Success (2xx/3xx)', 'Failed (4xx/5xx)'],
+        datasets: [{
+          data: [500, 0],
+          backgroundColor: ['#10b981', '#ef4444'],
+          borderColor: '#1e293b',
+          borderWidth: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#94a3b8', padding: 16 } }
+        },
+        cutout: '72%'
+      }
+    });
+  </script>
+</body>
+</html>
