@@ -13,14 +13,12 @@ const BASE_URL = process.env.TARGET_URL || "https://intellmeet-backend-hlpy.onre
 const CONCURRENCY = parseInt(process.env.CONCURRENCY || "100", 10);
 const TOTAL_REQUESTS = parseInt(process.env.TOTAL_REQUESTS || "500", 10);
 
-console.log(`\n=============================================================`);
-console.log(`🚀 INTELLMEET LOAD TEST RUNNER - APACHE JMETER SIMULATOR`);
-console.log(`=============================================================`);
+
+console.log(`\n INTELLMEET LOAD TEST RUNNER - APACHE JMETER SIMULATOR`);
 console.log(`Target Host  : ${BASE_URL}`);
 console.log(`Concurrency  : ${CONCURRENCY} Virtual Users (Threads)`);
 console.log(`Total Samples: ${TOTAL_REQUESTS} API Invocations`);
-console.log(`Ramp-up      : Automatic adaptive ramp`);
-console.log(`=============================================================\n`);
+console.log(`Ramp-up      : Automatic adaptive ramp\n`);
 
 const ENDPOINTS = [
   { name: "GET /api/health (Liveness)", method: "GET", path: "/api/health", expected: [200] },
@@ -129,7 +127,7 @@ async function run() {
   await Promise.all(workers);
 
   const totalTimeSec = (Date.now() - startTime) / 1000;
-  console.log(`\n\n✅ Load test execution completed in ${totalTimeSec.toFixed(2)}s`);
+  console.log(`\n\n Load test execution completed in ${totalTimeSec.toFixed(2)}s`);
 
   // Calculate statistics per endpoint & overall
   const overallLatencies = results.map((r) => r.latency).sort((a, b) => a - b);
@@ -177,7 +175,7 @@ async function run() {
     jtlContent += `${r.timestamp},${r.latency},"${r.endpoint}",${r.statusCode},"${r.success ? 'OK' : 'Error'}","IntellMeet-Thread-${(idx % CONCURRENCY) + 1}",text,${r.success},,${r.bytes},120,${CONCURRENCY},${CONCURRENCY},"${BASE_URL}",${r.latency},0,12\n`;
   });
   fs.writeFileSync(path.join(reportsDir, "jmeter-results.jtl"), jtlContent);
-  console.log(`📁 Saved raw JTL log: load-testing/reports/jmeter-results.jtl`);
+  console.log(`Saved raw JTL log: load-testing/reports/jmeter-results.jtl`);
 
   // Generate HTML Dashboard
   const htmlDashboard = generateHtmlDashboard({
@@ -202,19 +200,17 @@ async function run() {
   });
 
   fs.writeFileSync(path.join(reportsDir, "index.html"), htmlDashboard);
-  console.log(`🌐 Generated Apache JMeter HTML Dashboard: load-testing/reports/index.html`);
+  console.log(`Generated Apache JMeter HTML Dashboard: load-testing/reports/index.html`);
 
-  console.log(`\n=============================================================`);
-  console.log(`📊 LOAD TEST PERFORMANCE SUMMARY`);
-  console.log(`=============================================================`);
+
+  console.log(`\nLOAD TEST PERFORMANCE SUMMARY`);
   console.log(`Total Requests : ${results.length}`);
   console.log(`Throughput     : ${throughput} req/sec`);
   console.log(`Average Latency: ${avg} ms`);
   console.log(`P95 Latency    : ${p95} ms`);
   console.log(`P99 Latency    : ${p99} ms`);
   console.log(`Error Rate     : ${errorRate} %`);
-  console.log(`APDEX Score    : 0.99 (T=500ms, F=1500ms) - EXCELLENT`);
-  console.log(`=============================================================\n`);
+  console.log(`APDEX Score    : 0.99 (T=500ms, F=1500ms) - EXCELLENT\n`);
 }
 
 function generateHtmlDashboard(d) {

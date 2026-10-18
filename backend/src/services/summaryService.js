@@ -595,11 +595,10 @@ const exportSummary = async (meetingId, format = "txt") => {
     }
   } else {
     // Plain text
-    output += `========================================================\n`;
     output += `AI MEETING SUMMARY: ${title.toUpperCase()}\n`;
     output += `Date: ${dateStr}\n`;
-    output += `Host: ${host}\n`;
-    output += `========================================================\n\n`;
+    output += `Host: ${host}\n\n`;
+
 
     output += `1. EXECUTIVE OVERVIEW\n`;
     output += `---------------------\n`;

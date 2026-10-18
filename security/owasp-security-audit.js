@@ -20,13 +20,10 @@ const http = require("http");
 
 const BASE_URL = process.env.TARGET_URL || "https://intellmeet-backend-hlpy.onrender.com";
 
-console.log(`\n=============================================================`);
-console.log(`🛡️  INTELLMEET OWASP TOP 10 SECURITY AUDIT & SCANNER`);
-console.log(`=============================================================`);
+console.log(`\n INTELLMEET OWASP TOP 10 SECURITY AUDIT & SCANNER`);
 console.log(`Target Host: ${BASE_URL}`);
 console.log(`Standards  : OWASP Top 10 (2021/2026 Enterprise Web Standards)`);
 console.log(`Mode       : Automated Active & Passive Security Review`);
-console.log(`=============================================================\n`);
 
 const auditResults = [];
 
@@ -208,14 +205,11 @@ async function runSecurityAudit() {
   const totalCount = auditResults.length;
   const score = Math.round((passedCount / totalCount) * 100);
 
-  console.log(`\n=============================================================`);
-  console.log(`🏁 OWASP SECURITY AUDIT SUMMARY`);
-  console.log(`=============================================================`);
+  console.log(`\n OWASP SECURITY AUDIT SUMMARY`);
   console.log(`Total Checks   : ${totalCount}`);
   console.log(`Passed         : ${passedCount}`);
   console.log(`Failed         : ${totalCount - passedCount}`);
   console.log(`Compliance Rate: ${score}% (GRADE: A+)`);
-  console.log(`=============================================================\n`);
 
   // Write Markdown Report
   const securityDir = path.join(__dirname);
@@ -225,11 +219,11 @@ async function runSecurityAudit() {
 
   const mdReport = generateMarkdownReport(auditResults, score, passedCount, totalCount);
   fs.writeFileSync(path.join(securityDir, "OWASP_ZAP_SECURITY_REPORT.md"), mdReport);
-  console.log(`📄 Saved Markdown Security Review: security/OWASP_ZAP_SECURITY_REPORT.md`);
+  console.log(`Saved Markdown Security Review: security/OWASP_ZAP_SECURITY_REPORT.md`);
 
   const htmlReport = generateHtmlSecurityReport(auditResults, score, passedCount, totalCount);
   fs.writeFileSync(path.join(securityDir, "owasp_report.html"), htmlReport);
-  console.log(`🌐 Saved HTML Security Audit Dashboard: security/owasp_report.html`);
+  console.log(`Saved HTML Security Audit Dashboard: security/owasp_report.html`);
 }
 
 function generateMarkdownReport(results, score, passed, total) {
