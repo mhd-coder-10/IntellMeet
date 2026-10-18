@@ -16,6 +16,11 @@ const actionItemSchema = new mongoose.Schema(
       ref: "Summary",
       default: null,
     },
+    title: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     task: {
       type: String,
       required: [true, "Action item task description is required"],

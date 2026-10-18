@@ -126,7 +126,7 @@ const notifyAssignee = async (item, meetingId, senderId, actionType = "assigned"
  * Manually add an action item to a meeting
  */
 const createActionItem = async (meetingId, data, userId, io = null) => {
-  const { task, assignee, assigneeName, priority = "medium", dueDate } = data;
+  const { title = "", task, assignee, assigneeName, priority = "medium", dueDate } = data;
 
   if (!task || !task.trim()) {
     const error = new Error("Task description is required");
@@ -168,6 +168,7 @@ const createActionItem = async (meetingId, data, userId, io = null) => {
 
   const newItem = new ActionItem({
     meeting: meetingId,
+    title: (title || "").trim(),
     task: task.trim(),
     assignee: resolvedAssignee,
     assigneeName: resolvedName,
@@ -225,6 +226,7 @@ const updateActionItem = async (actionItemId, updates, userId, io = null) => {
 
   const previousAssignee = item.assignee ? item.assignee.toString() : null;
 
+  if (updates.title !== undefined) item.title = updates.title.trim();
   if (updates.task) item.task = updates.task.trim();
   if (updates.priority) item.priority = updates.priority;
   if (updates.assignee !== undefined) item.assignee = updates.assignee;
@@ -557,7 +559,7 @@ const convertActionItemToTask = async (actionItemId, data, userId, io = null) =>
 
   // Create Kanban task
   const task = await Task.create({
-    title: (title || actionItem.task).trim(),
+    title: (title || actionItem.title || actionItem.task).trim(),
     description: (description || `Generated from meeting action item: "${actionItem.task}"`).trim(),
     project: projectId,
     team: teamId,

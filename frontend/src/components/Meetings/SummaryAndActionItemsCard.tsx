@@ -74,6 +74,7 @@ export function SummaryAndActionItemsCard({
   const canGenerate = Boolean(hasRecordings || hasTranscript);
   const [isCopied, setIsCopied] = useState(false);
   const [isAddingItem, setIsAddingItem] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
   const [newTask, setNewTask] = useState("");
   const [newAssigneeName, setNewAssigneeName] = useState("");
   const [newPriority, setNewPriority] = useState<ActionItemPriority>("medium");
@@ -165,6 +166,7 @@ export function SummaryAndActionItemsCard({
 
   // Inline editing state
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
   const [editTask, setEditTask] = useState("");
   const [editAssigneeName, setEditAssigneeName] = useState("");
   const [editPriority, setEditPriority] = useState<ActionItemPriority>("medium");
@@ -264,6 +266,7 @@ export function SummaryAndActionItemsCard({
   const addItemMutation = useMutation({
     mutationFn: () =>
       createMeetingActionItem(meetingId, {
+        title: newTitle.trim(),
         task: newTask,
         assigneeName: newAssigneeName || "Unassigned",
         priority: newPriority,
@@ -279,6 +282,7 @@ export function SummaryAndActionItemsCard({
           };
         }
       );
+      setNewTitle("");
       setNewTask("");
       setNewAssigneeName("");
       setNewPriority("medium");
@@ -298,6 +302,7 @@ export function SummaryAndActionItemsCard({
     }: {
       actionItemId: string;
       payload: {
+        title?: string;
         task?: string;
         assigneeName?: string;
         priority?: ActionItemPriority;
@@ -326,6 +331,7 @@ export function SummaryAndActionItemsCard({
 
   const handleStartEdit = (item: MeetingActionItem) => {
     setEditingItemId(item._id);
+    setEditTitle(item.title || "");
     setEditTask(item.task);
     setEditAssigneeName(item.assigneeName || "");
     setEditPriority(item.priority || "medium");
@@ -422,7 +428,7 @@ export function SummaryAndActionItemsCard({
   // Open convert modal
   const handleOpenConvertModal = (item: MeetingActionItem) => {
     setConvertModalItem(item);
-    setTaskTitle(item.task);
+    setTaskTitle(item.title || item.task);
     setTaskDescription(`Action item from meeting "${meetingTitle}": ${item.task}`);
     setTaskPriority(item.priority || "medium");
     setTaskDueDate(
@@ -873,6 +879,13 @@ export function SummaryAndActionItemsCard({
                 <div className="p-3 rounded-xl bg-purple-50/70 border border-purple-200 space-y-2 animate-in fade-in duration-200">
                   <input
                     type="text"
+                    placeholder="Short task title (e.g. UI & API Integration Fixes)..."
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    className="w-full text-xs p-2 rounded-lg bg-white border border-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 font-semibold"
+                  />
+                  <input
+                    type="text"
                     placeholder="Action item task description..."
                     value={newTask}
                     onChange={(e) => setNewTask(e.target.value)}
@@ -979,6 +992,13 @@ export function SummaryAndActionItemsCard({
                           </div>
                           <input
                             type="text"
+                            placeholder="Short task title (e.g. UI & API Integration Fixes)..."
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            className="w-full text-xs p-2 rounded-lg bg-white border border-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 font-semibold"
+                          />
+                          <input
+                            type="text"
                             placeholder="Action item task description..."
                             value={editTask}
                             onChange={(e) => setEditTask(e.target.value)}
@@ -1035,6 +1055,7 @@ export function SummaryAndActionItemsCard({
                                 updateItemMutation.mutate({
                                   actionItemId: item._id,
                                   payload: {
+                                    title: editTitle.trim(),
                                     task: editTask,
                                     assigneeName: editAssigneeName || "Unassigned",
                                     priority: editPriority,
@@ -1074,10 +1095,23 @@ export function SummaryAndActionItemsCard({
 
                         {/* Task Content */}
                         <div className="flex-1 min-w-0 space-y-1">
+                          {item.title ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded">
+                                Task
+                              </span>
+                              <h4
+                                className={`text-xs font-bold tracking-tight transition ${isDone ? "line-through text-slate-400" : "text-slate-900"
+                                  }`}
+                              >
+                                {item.title}
+                              </h4>
+                            </div>
+                          ) : null}
                           <p
-                            className={`text-xs leading-relaxed font-medium transition ${isDone
+                            className={`text-xs leading-relaxed transition ${isDone
                               ? "line-through text-slate-400"
-                              : "text-slate-800"
+                              : "text-slate-600 font-normal"
                               }`}
                           >
                             {item.task}
@@ -1086,8 +1120,9 @@ export function SummaryAndActionItemsCard({
                           {/* Metadata row: Assignee, Priority, Due Date */}
                           <div className="flex items-center gap-2 flex-wrap text-[10px]">
                             {/* Assignee Badge */}
-                            <span className="inline-flex items-center gap-1 font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md">
-                              {item.assigneeName || "Team"}
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                              <span>{item.assigneeName || "Unassigned"}</span>
                             </span>
 
                             {/* Priority Badge */}
@@ -1128,10 +1163,10 @@ export function SummaryAndActionItemsCard({
                               <Link
                                 to={`/teams/${(item.convertedTeam as any)?._id || item.convertedTeam}/projects/${(item.convertedProject as any)?._id || item.convertedProject}`}
                                 className="inline-flex items-center gap-1 font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300 px-2 py-0.5 rounded-md transition"
-                                title="Open in Kanban Project Board"
+                                title="Open in Kanban Project Board (To-Do)"
                               >
                                 <FolderKanban className="w-2.5 h-2.5 text-indigo-600" />
-                                <span>Board: {(item.convertedProject as any)?.name || "Kanban"} ↗</span>
+                                <span>Board: {(item.convertedProject as any)?.name || "Kanban"} (To-Do) ↗</span>
                               </Link>
                             ) : item.isWorkspaceTaskDeleted ? (
                               <span

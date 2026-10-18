@@ -39,6 +39,7 @@ export interface MeetingActionItem {
   _id: string;
   meeting: string;
   summary?: string;
+  title?: string;
   task: string;
   assignee?: {
     _id: string;
@@ -87,6 +88,7 @@ export interface GenerateSummaryPayload {
 }
 
 export interface CreateActionItemPayload {
+  title?: string;
   task: string;
   assignee?: string | null;
   assigneeName?: string;

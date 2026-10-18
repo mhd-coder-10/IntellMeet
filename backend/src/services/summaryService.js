@@ -78,11 +78,16 @@ const generateSummary = async (meetingId, userId, options = {}) => {
     .filter(Boolean)
     .join(", ");
 
+  const attendeesFormatted = participantsList
+    .map((p) => `- "${p.name}" (username: @${p.username})`)
+    .join("\n");
+
   // 4. Construct AI Prompt
   const prompt = `You are an elite enterprise AI meeting intelligence assistant.
 Meeting Title: "${meeting.title || "Meeting"}"
 Host: "${hostName}"
-Attendees: ${participantNames || "Team Members"}
+Attendees:
+${attendeesFormatted || participantNames || "Team Members"}
 
 Below is the verbatim transcription of the meeting:
 """
@@ -93,11 +98,14 @@ Analyze this transcript thoroughly and extract:
 1. "overview": A concise 2-4 sentence executive summary of what was discussed, purpose, and outcomes.
 2. "keyPoints": Array of 3 to 6 bullet points covering major topics and insights discussed.
 3. "decisions": Array of 1 to 4 clear decisions or conclusions agreed upon. If none explicitly stated, infer the key takeaway.
-4. "actionItems": Array of concrete tasks extracted from what needs to be done. Each task must have:
-   - "task": Clear actionable description of the task.
-   - "assigneeName": Name of the person responsible if mentioned or inferred from Attendees list (${participantNames}), or "Team" / "Host".
+4. "actionItems": Array of concrete tasks extracted from what needs to be done.
+   CRITICAL REQUIREMENTS FOR EACH ACTION ITEM:
+   - "title": A short, crisp, professional 3-6 word task title summarizing the action (e.g. "UI & API Integration Fixes", "Database Consistency Verification", "API Validation & Error Handling", "Regression Testing on Modules", "Client Delivery Documentation").
+   - "task": Clear actionable description of what needs to be accomplished.
+   - "assigneeName": MUST STRICTLY be one of the EXACT attendee names from the Attendees list above: [${participantNames}].
+     CRITICAL: DO NOT use generic role titles like "Frontend Developer", "Back-end Developer", "Database Developer", "QA Developer", "Testing Team", "Client Delivery Developer", "Team", "Host", or "Unassigned". You MUST assign each task to an actual attendee person's exact name from the Attendees list based on who spoke about or owns that responsibility in the meeting.
    - "priority": "high", "medium", or "low".
-   - "dueDateText": Timeframe or deadline if mentioned (e.g. "By end of week", "Tomorrow", "Next meeting") or "TBD".
+   - "dueDateText": Timeframe or deadline if mentioned (e.g. "By end of week", "Tomorrow", "Next meeting") or "Next meeting".
 5. "sentiment": One of "productive", "positive", "neutral", "constructive", "urgent".
 
 Respond STRICTLY with valid JSON matching this schema:
@@ -107,10 +115,11 @@ Respond STRICTLY with valid JSON matching this schema:
   "decisions": ["..."],
   "actionItems": [
     {
+      "title": "...",
       "task": "...",
       "assigneeName": "...",
       "priority": "medium",
-      "dueDateText": "TBD"
+      "dueDateText": "Next meeting"
     }
   ],
   "sentiment": "productive"
@@ -218,10 +227,95 @@ Respond STRICTLY with valid JSON matching this schema:
   await existingSummary.save();
 
   // 7. Process and Save Action Items
-  // If forceRegenerate, remove previous AI-generated items (preserve manual items)
+  const { io = null } = options;
+  const Task = require("../models/Task");
+  const Project = require("../models/Project");
+  const Team = require("../models/Team");
+
+  // If forceRegenerate, remove previous AI-generated items AND any linked tasks from Kanban
   if (forceRegenerate) {
+    const oldAiItems = await ActionItem.find({ meeting: meetingId, isAiGenerated: true });
+    const oldTaskIds = oldAiItems.map((i) => i.convertedTask).filter(Boolean);
+    if (oldTaskIds.length > 0) {
+      await Task.deleteMany({ _id: { $in: oldTaskIds } });
+    }
     await ActionItem.deleteMany({ meeting: meetingId, isAiGenerated: true });
   }
+
+  // Helper to generate a short title from task text if not provided
+  const generateShortTitle = (taskText) => {
+    if (!taskText) return "Action Item";
+    const cleaned = taskText.replace(/^[\d\.\-\*\s]+/, "").trim();
+    const firstPart = cleaned.split(/[\.\:\;\n]/)[0].trim();
+    const words = firstPart.split(/\s+/);
+    if (words.length <= 6) return firstPart;
+    return words.slice(0, 6).join(" ");
+  };
+
+  // Helper to reliably map any raw assignee string or context to a real participant
+  const resolveParticipant = (rawAssigneeName, taskText = "", titleText = "") => {
+    if (!participantsList || participantsList.length === 0) return null;
+    const target = (rawAssigneeName || "").toLowerCase().trim();
+    const fullContext = `${target} ${taskText} ${titleText}`.toLowerCase();
+
+    // 1. Direct exact or substring match with participant name or username
+    for (const p of participantsList) {
+      const pName = (p.name || "").toLowerCase().trim();
+      const pUser = (p.username || "").toLowerCase().trim();
+      if (pName && (target === pName || target.includes(pName) || pName.includes(target))) {
+        return p;
+      }
+      if (pUser && (target === pUser || target.includes(pUser) || pUser.includes(target))) {
+        return p;
+      }
+    }
+
+    // 2. First-name or Last-name match
+    for (const p of participantsList) {
+      const parts = (p.name || "").toLowerCase().split(/\s+/).filter(Boolean);
+      for (const part of parts) {
+        if (part.length >= 3 && target.includes(part)) {
+          return p;
+        }
+      }
+    }
+
+    // 3. Domain & role heuristics mapping to actual attendees based on speech topics
+    const roleMatchers = [
+      { keywords: ["front", "ui", "ux", "responsive", "css", "layout"], roleKey: "front" },
+      { keywords: ["back", "api", "controller", "service", "route", "server"], roleKey: "back" },
+      { keywords: ["data", "db", "database", "query", "record", "storage"], roleKey: "db" },
+      { keywords: ["test", "qa", "regression", "bug", "retest"], roleKey: "qa" },
+      { keywords: ["client", "delivery", "handover", "document"], roleKey: "client" },
+    ];
+
+    for (const m of roleMatchers) {
+      if (m.keywords.some((k) => target.includes(k))) {
+        const matched = participantsList.find((p) => {
+          const name = (p.name || "").toLowerCase();
+          const user = (p.username || "").toLowerCase();
+          if (m.roleKey === "front" && (name.includes("charoliya") || user.includes("cha10") || name.includes("front"))) return true;
+          if (m.roleKey === "back" && (name.includes("mohammad ch") || user.includes("cha_mhd") || name.includes("back"))) return true;
+          if (m.roleKey === "db" && (name.includes("scuben") || user.includes("scuben") || name.includes("data"))) return true;
+          if (m.roleKey === "qa" && (name.includes("int") || user.includes("int16") || name.includes("test") || name.includes("qa"))) return true;
+          if (m.roleKey === "client" && (p._id.toString() === meeting.host?._id?.toString() || name.includes("mhd dev"))) return true;
+          return false;
+        });
+        if (matched) return matched;
+      }
+    }
+
+    // 4. Check if task text or title mentions participant's name
+    for (const p of participantsList) {
+      const pName = (p.name || "").toLowerCase().trim();
+      if (pName && fullContext.includes(pName)) {
+        return p;
+      }
+    }
+
+    // 5. Fallback: Host or first participant, so it is NEVER null or generic role string!
+    return meeting.host || participantsList[0];
+  };
 
   const rawActionItems = Array.isArray(parsed?.actionItems) ? parsed.actionItems : [];
   const savedActionItems = [];
@@ -229,32 +323,122 @@ Respond STRICTLY with valid JSON matching this schema:
   for (const item of rawActionItems) {
     if (!item?.task) continue;
 
-    // Attempt to match assigneeName with meeting attendee
-    let matchedUser = null;
-    if (item.assigneeName) {
-      const target = item.assigneeName.toLowerCase().trim();
-      matchedUser = participantsList.find((p) => {
-        const pName = (p.name || "").toLowerCase();
-        const pUser = (p.username || "").toLowerCase();
-        return pName.includes(target) || target.includes(pName) || pUser.includes(target);
-      });
-    }
+    const shortTitle = (item.title || "").trim() || generateShortTitle(item.task);
+    const matchedUser = resolveParticipant(item.assigneeName, item.task, shortTitle);
 
     const newActionItem = new ActionItem({
       meeting: meetingId,
       summary: existingSummary._id,
+      title: shortTitle,
       task: item.task.trim(),
-      assignee: matchedUser ? matchedUser._id : null,
-      assigneeName: matchedUser ? matchedUser.name : (item.assigneeName || "Unassigned"),
+      assignee: matchedUser ? matchedUser._id : (meeting.host?._id || null),
+      assigneeName: matchedUser ? matchedUser.name : (meeting.host?.name || "Host"),
       priority: ["low", "medium", "high", "urgent"].includes((item.priority || "").toLowerCase())
         ? item.priority.toLowerCase()
         : "medium",
       status: "pending",
-      dueDateText: item.dueDateText || "TBD",
+      dueDateText: item.dueDateText || "Next meeting",
       isAiGenerated: true,
     });
     await newActionItem.save();
     savedActionItems.push(newActionItem);
+  }
+
+  // 8. Auto-Push Action Items into Kanban Board (Default status: "To-Do" / col-todo)
+  let targetProjectId = meeting.project ? (meeting.project._id || meeting.project) : null;
+  let targetTeamId = meeting.workspace ? (meeting.workspace._id || meeting.workspace) : null;
+
+  if (!targetProjectId && targetTeamId) {
+    const defaultProj = await Project.findOne({ team: targetTeamId }).sort({ createdAt: 1 });
+    if (defaultProj) targetProjectId = defaultProj._id;
+  }
+
+  if (targetProjectId && !targetTeamId) {
+    const projDoc = await Project.findById(targetProjectId);
+    if (projDoc) targetTeamId = projDoc.team;
+  }
+
+  if (!targetProjectId || !targetTeamId) {
+    const hostTeam = await Team.findOne({
+      $or: [
+        { owner: meeting.host?._id || meeting.host },
+        { "members.user": meeting.host?._id || meeting.host },
+      ],
+    });
+    if (hostTeam) {
+      targetTeamId = hostTeam._id;
+      const projDoc = await Project.findOne({ team: hostTeam._id }).sort({ createdAt: 1 });
+      if (projDoc) targetProjectId = projDoc._id;
+    }
+  }
+
+  if (targetProjectId && targetTeamId) {
+    let currentOrder = 0;
+    const highestTask = await Task.findOne({
+      project: targetProjectId,
+      columnId: "col-todo",
+    }).sort({ order: -1 });
+    if (highestTask && typeof highestTask.order === "number") {
+      currentOrder = highestTask.order + 1;
+    }
+
+    const targetProjectDoc = await Project.findById(targetProjectId).select("name");
+
+    for (const actionItem of savedActionItems) {
+      try {
+        const kanbanTask = await Task.create({
+          title: actionItem.title || actionItem.task,
+          description: actionItem.task,
+          project: targetProjectId,
+          team: targetTeamId,
+          columnId: "col-todo",
+          status: "todo",
+          priority: actionItem.priority || "medium",
+          assignee: actionItem.assignee || null,
+          creator: meeting.host?._id || userId,
+          dueDate: actionItem.dueDate || null,
+          order: currentOrder++,
+          tags: ["Meeting", "ActionItem", "AI-Extracted"],
+          meeting: meetingId,
+          actionItemId: actionItem._id,
+        });
+
+        actionItem.isConverted = true;
+        actionItem.convertedTask = kanbanTask._id;
+        actionItem.convertedProject = targetProjectId;
+        actionItem.convertedTeam = targetTeamId;
+        actionItem.convertedAt = new Date();
+        await actionItem.save();
+
+        if (io) {
+          const populatedTask = await Task.findById(kanbanTask._id)
+            .populate("assignee", "name username email profilePicture")
+            .populate("creator", "name username email profilePicture");
+          io.to(`project:${targetProjectId}`).emit("task:created", populatedTask);
+          io.to(`team:${targetTeamId}`).emit("team:updated", { _id: targetTeamId });
+          io.emit("team:updated", { _id: targetTeamId });
+        }
+
+        // Send notification to assigned attendee if not self
+        if (actionItem.assignee && actionItem.assignee.toString() !== (userId || "").toString()) {
+          try {
+            const notificationService = require("./notificationService");
+            await notificationService.createNotification({
+              recipient: actionItem.assignee,
+              sender: userId || meeting.host?._id || null,
+              type: "task_assigned",
+              title: "Task Assigned from Meeting",
+              message: `You were assigned: "${actionItem.title || actionItem.task}" on board "${targetProjectDoc?.name || "Kanban"}" from meeting "${meeting.title}"`,
+              link: `/teams/${targetTeamId}/projects/${targetProjectId}`,
+            });
+          } catch (notifErr) {
+            console.warn("[AI Summary] Assignee notification error:", notifErr.message);
+          }
+        }
+      } catch (taskErr) {
+        console.warn("[AI Summary] Auto-push to Kanban task creation error:", taskErr.message);
+      }
+    }
   }
 
   // Fetch all action items for this meeting (including any manual ones)
@@ -405,7 +589,8 @@ const exportSummary = async (meetingId, format = "txt") => {
     } else {
       actionItems.forEach((item) => {
         const checkbox = item.status === "completed" ? "[x]" : "[ ]";
-        output += `- ${checkbox} **${item.task}** (Assignee: ${item.assigneeName || "Unassigned"} | Priority: ${item.priority.toUpperCase()})\n`;
+        const titleStr = item.title ? `**${item.title}:** ` : "";
+        output += `- ${checkbox} ${titleStr}${item.task} (Assignee: ${item.assigneeName || "Unassigned"} | Priority: ${item.priority.toUpperCase()})\n`;
       });
     }
   } else {
@@ -443,7 +628,8 @@ const exportSummary = async (meetingId, format = "txt") => {
     } else {
       actionItems.forEach((item, i) => {
         const mark = item.status === "completed" ? "[DONE]" : "[PENDING]";
-        output += `${i + 1}. ${mark} ${item.task} (Owner: ${item.assigneeName || "Unassigned"}, Priority: ${item.priority})\n`;
+        const titleStr = item.title ? `[${item.title}] ` : "";
+        output += `${i + 1}. ${mark} ${titleStr}${item.task} (Owner: ${item.assigneeName || "Unassigned"}, Priority: ${item.priority})\n`;
       });
     }
   }

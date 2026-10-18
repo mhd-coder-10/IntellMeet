@@ -141,12 +141,11 @@ const generateSummary = async (req, res) => {
     const { id: meetingId } = req.params;
     const { forceRegenerate } = req.body || {};
 
+    const io = req.app.get("io");
     const result = await summaryService.generateSummary(meetingId, req.user?.id, {
       forceRegenerate,
+      io,
     });
-
-    // Broadcast socket event if io is available
-    const io = req.app.get("io");
     if (io) {
       io.to(meetingId).emit("summary:completed", {
         meetingId,
