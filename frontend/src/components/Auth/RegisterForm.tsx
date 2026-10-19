@@ -65,15 +65,9 @@ export function RegisterForm() {
         const { email, name } = getValues()
         setIsLoading(true)
         try {
-            const res = await sendSignupOtp({ email, name })
-            const returnedOtp = res?.otp || res?.data?.otp
-            if (returnedOtp) {
-                setOtpCode(returnedOtp)
-                toast.success(`Verification Code: ${returnedOtp}`, { duration: 15000 })
-            } else {
-                setOtpCode('')
-                toast.success(`Verification code sent to ${email}`)
-            }
+            await sendSignupOtp({ email, name })
+            setOtpCode('')
+            toast.success(`Verification code sent to ${email}. Please check your inbox.`)
             setStep(2)
             setResendCooldown(60)
             setOtpError('')
@@ -92,15 +86,9 @@ export function RegisterForm() {
         const { email, name } = getValues()
         setIsResending(true)
         try {
-            const res = await sendSignupOtp({ email, name })
-            const returnedOtp = res?.otp || res?.data?.otp
-            if (returnedOtp) {
-                setOtpCode(returnedOtp)
-                toast.success(`Verification Code: ${returnedOtp}`, { duration: 15000 })
-            } else {
-                setOtpCode('')
-                toast.success('A new verification code has been sent!')
-            }
+            await sendSignupOtp({ email, name })
+            setOtpCode('')
+            toast.success('A new verification code has been sent to your email!')
             setResendCooldown(60)
             setOtpError('')
         } catch (error: any) {
@@ -295,7 +283,9 @@ export function RegisterForm() {
                             maxLength={6}
                             placeholder="••••••"
                             value={otpCode}
-                            autoComplete="one-time-code"
+                            autoComplete="off"
+                            autoCorrect="off"
+                            spellCheck={false}
                             data-1p-ignore="true"
                             data-lpignore="true"
                             onChange={(e) => {
