@@ -25,7 +25,10 @@ const protect = async (req, res, next) => {
 
     const decoded = verifyToken(token, process.env.JWT_SECRET);
 
-    const user = await User.findById(decoded.id);
+    // Lean projection: only load identity fields, skip heavy arrays
+    const user = await User.findById(decoded.id).select(
+      "name username email role profilePicture isEmailVerified"
+    );
 
     if (!user) {
       return res.status(401).json({
@@ -41,7 +44,7 @@ const protect = async (req, res, next) => {
       email: user.email,
       role: user.role,
       profilePicture: user.profilePicture,
-    }
+    };
 
     next();
 

@@ -49,13 +49,16 @@ const getTransporter = async () => {
     if (service) {
       transporter = nodemailer.createTransport({
         service,
+        pool: true,
+        maxConnections: 3,
+        maxMessages: 100,
         auth: {
           user: smtpUser,
           pass: smtpPass,
         },
-        connectionTimeout: 6000,
-        greetingTimeout: 6000,
-        socketTimeout: 7000,
+        connectionTimeout: 4000,
+        greetingTimeout: 4000,
+        socketTimeout: 5000,
       });
       console.log(`[Email Service] Transporter initialized with service: ${service} (${smtpUser})`);
     } else {
@@ -63,13 +66,16 @@ const getTransporter = async () => {
         host: "smtp.gmail.com",
         port: 587,
         secure: false,
+        pool: true,
+        maxConnections: 3,
+        maxMessages: 100,
         auth: {
           user: smtpUser,
           pass: smtpPass,
         },
-        connectionTimeout: 6000,
-        greetingTimeout: 6000,
-        socketTimeout: 7000,
+        connectionTimeout: 4000,
+        greetingTimeout: 4000,
+        socketTimeout: 5000,
       });
       console.log(`[Email Service] Transporter initialized with smtp.gmail.com (${smtpUser})`);
     }
@@ -83,25 +89,15 @@ const getTransporter = async () => {
       "SMTP_PASS=your_16_digit_gmail_app_password\n"
     );
     try {
-      const testAccount = await nodemailer.createTestAccount();
-      transporter = nodemailer.createTransport({
-        host: "smtp.ethereal.email",
-        port: 587,
-        secure: false,
-        auth: {
-          user: testAccount.user,
-          pass: testAccount.pass,
-        },
-      });
-      console.log("[Email Service] Using Ethereal sandbox test email account:", testAccount.user);
-    } catch {
-      // Safe mock transporter that prints to console
+      // Safe fast simulated transporter without network blocking
       transporter = {
         sendMail: async (opts) => {
           console.log(`[Email Simulation] To: ${opts.to} | Subject: ${opts.subject}`);
           return { messageId: "simulated-" + Date.now() };
         },
       };
+    } catch {
+      // fallback
     }
   }
 

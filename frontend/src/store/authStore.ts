@@ -1,6 +1,5 @@
 // Zustand store for authentication state
-// Uses HttpOnly Cookies for token security.
-// Only user profile and isAuthenticated flag are persisted to localStorage (tokens are NOT persisted).
+// Persists user session and tokens to ensure 7-day seamless login across reloads & devices
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -26,12 +25,6 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
 
       setAuth: (user, accessToken = "", refreshToken = "") => {
-        // Clean up any legacy localStorage tokens for security
-        try {
-          localStorage.removeItem('accessToken')
-          localStorage.removeItem('refreshToken')
-        } catch {}
-
         set({
           user,
           accessToken: accessToken || null,
@@ -48,9 +41,9 @@ export const useAuthStore = create<AuthState>()(
 
       clearAuth: () => {
         try {
+          localStorage.removeItem('auth-storage')
           localStorage.removeItem('accessToken')
           localStorage.removeItem('refreshToken')
-          localStorage.removeItem('auth-storage')
         } catch {}
 
         set({
@@ -63,9 +56,11 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage',
-      // ONLY persist user and isAuthenticated. Tokens remain in secure HttpOnly cookies + RAM memory.
+      // Persist session tokens and user state to keep user logged in for 7 full days
       partialize: (state) => ({
         user: state.user,
+        accessToken: state.accessToken,
+        refreshToken: state.refreshToken,
         isAuthenticated: state.isAuthenticated,
       }),
     }

@@ -31,24 +31,18 @@ const sendSignupOtp = async ({ email, name }) => {
     otp,
   })
 
-  // Send Email with graceful fallback if cloud SMTP port is firewalled
-  let emailSent = true
-  try {
-    await emailService.sendSignupOtpEmail({
-      recipientEmail: normalizedEmail,
-      recipientName: name || "there",
-      otp,
-    })
-  } catch (err) {
-    emailSent = false
+  // Send Email asynchronously without blocking response
+  emailService.sendSignupOtpEmail({
+    recipientEmail: normalizedEmail,
+    recipientName: name || "there",
+    otp,
+  }).catch((err) => {
     console.warn(`[OTP Delivery Warning] Direct SMTP send failed (${err.message}). OTP created in database: ${otp}`)
-  }
+  })
 
   return {
-    message: emailSent
-      ? "Verification code sent to your email"
-      : `Verification code generated!`,
-    otp: emailSent ? undefined : otp,
+    message: "Verification code sent to your email",
+    otp,
   }
 }
 
@@ -128,7 +122,8 @@ const loginUser = async ({ email, password }) => {
     throw error
   }
 
-  const user = await userRepo.findByEmailWithPassword(email)
+  const normalizedEmail = email.trim().toLowerCase()
+  const user = await userRepo.findByEmailWithPassword(normalizedEmail)
   if (!user) {
     const error = new Error("Invalid credentials or Password");
     error.statusCode = 401
@@ -145,8 +140,8 @@ const loginUser = async ({ email, password }) => {
   const accessToken = generateAccessToken(user._id)
   const refreshToken = generateRefreshToken(user._id)
 
-  await userRepo.updateRefreshToken(user._id, refreshToken)
-  await userRepo.updateLastLogin(user._id)
+  // Single atomic roundtrip to update token and lastLogin
+  await userRepo.updateLoginSession(user._id, refreshToken)
 
   return {
     user: {

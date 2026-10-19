@@ -43,6 +43,13 @@ class UserRepository extends BaseRepository {
         return User.findByIdAndUpdate(id, { lastLoginAt: new Date() })
     }
 
+    updateLoginSession(id, token) {
+        return User.findByIdAndUpdate(id, {
+            refreshToken: token,
+            lastLoginAt: new Date(),
+        })
+    }
+
     updateAvatar(id, url) {
         return User.findByIdAndUpdate(
             id,

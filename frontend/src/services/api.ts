@@ -28,16 +28,23 @@ let refreshPromise: Promise<string> | null = null;
 
 const performRefresh = async (): Promise<string> => {
   const baseURL = import.meta.env.VITE_API_URL || "http://localhost:5100/api";
-  // Browser automatically sends HttpOnly refreshToken cookie with withCredentials: true
+  const currentRefreshToken = useAuthStore.getState().refreshToken;
+
   const res = await axios.post(
     `${baseURL}/auth/refresh`,
-    {},
+    { refreshToken: currentRefreshToken },
     { withCredentials: true }
   );
 
   const newAccessToken = res.data?.data?.accessToken || "";
+  const newRefreshToken = res.data?.data?.refreshToken || currentRefreshToken;
+
   if (newAccessToken) {
     useAuthStore.getState().setAccessToken(newAccessToken);
+    const currentUser = useAuthStore.getState().user;
+    if (currentUser && newRefreshToken) {
+      useAuthStore.getState().setAuth(currentUser, newAccessToken, newRefreshToken);
+    }
   }
   return newAccessToken;
 };
