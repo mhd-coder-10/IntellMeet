@@ -57,7 +57,6 @@ export default function MeetingRoom() {
   const [remoteRecordingTime, setRemoteRecordingTime] = useState(0);
   const [remoteIsPaused, setRemoteIsPaused] = useState(false);
   const pendingRecordingsRef = useRef<RecordedResult[]>([]);
-  const isAutoPausedDueToEmptyRoomRef = useRef(false);
 
   const { socket, isConnected } = useSocket();
   const user = useAuthStore((state) => state.user);
@@ -304,40 +303,6 @@ export default function MeetingRoom() {
     }
   }, [recordedResult]);
 
-  // Auto-pause recording if recorder is alone in the room, and auto-resume when participants join
-  useEffect(() => {
-    if (!isRecorderActive()) {
-      isAutoPausedDueToEmptyRoomRef.current = false;
-      return;
-    }
-
-    if (peers.length === 0) {
-      if (!isPaused && !isAutoPausedDueToEmptyRoomRef.current) {
-        pauseRecording();
-        socket?.emit("meeting:recording-paused", {
-          meetingId: id,
-          currentSeconds: recordingTime,
-        });
-        isAutoPausedDueToEmptyRoomRef.current = true;
-        toast.info("⏸️ Recording auto-paused (waiting for participants to join)");
-      }
-    } else {
-      if (isPaused && isAutoPausedDueToEmptyRoomRef.current) {
-        resumeRecording();
-        socket?.emit("meeting:recording-resumed", { meetingId: id });
-        isAutoPausedDueToEmptyRoomRef.current = false;
-        toast.info("▶️ Recording auto-resumed (participant joined)");
-      }
-    }
-  }, [
-    peers.length,
-    isPaused,
-    isRecorderActive,
-    pauseRecording,
-    resumeRecording,
-    socket,
-    id,
-  ]);
 
   // Listen for host ending or auto-concluded meeting
   useEffect(() => {
@@ -456,7 +421,16 @@ export default function MeetingRoom() {
       }
     };
 
-    const handleRecordStop = async () => {
+    const handleRecordStop = async (data?: { userId?: string }) => {
+      // If current user is host and actively recording, ignore remote stop signals from other departing users
+      const currentUserId = user?.id || (user as any)?._id;
+      if (isHost && isRecorderActive()) {
+        if (data?.userId && String(data.userId) !== String(currentUserId)) {
+          console.log("Ignoring remote recording-stopped event from peer:", data.userId);
+          return;
+        }
+      }
+
       setRecordingState(false);
       setRemoteIsPaused(false);
       setRemoteRecordingTime(0);
@@ -840,7 +814,6 @@ export default function MeetingRoom() {
 
   // Pause composite recording (host only)
   const handlePauseRecording = () => {
-    isAutoPausedDueToEmptyRoomRef.current = false;
     pauseRecording();
     socket?.emit("meeting:recording-paused", {
       meetingId: id,
@@ -851,7 +824,6 @@ export default function MeetingRoom() {
 
   // Resume composite recording (host only)
   const handleResumeRecording = () => {
-    isAutoPausedDueToEmptyRoomRef.current = false;
     resumeRecording();
     socket?.emit("meeting:recording-resumed", { meetingId: id });
     toast.info("Recording resumed");

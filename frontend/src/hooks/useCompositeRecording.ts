@@ -963,6 +963,17 @@ export function useCompositeRecording() {
           })),
         ];
 
+        // Clean up cached offscreen video elements for participants who have left
+        const activeIds = new Set(participants.map((p) => p.id));
+        videoElementsRef.current.forEach((video, id) => {
+          if (!activeIds.has(id)) {
+            try {
+              video.srcObject = null;
+            } catch { }
+            videoElementsRef.current.delete(id);
+          }
+        });
+
         const screenInfo = getScreenShareInfo();
 
         if (screenInfo) {
@@ -1068,6 +1079,10 @@ export function useCompositeRecording() {
         if (e.data && e.data.size > 0) {
           chunksRef.current.push(e.data);
         }
+      };
+
+      recorder.onerror = (e) => {
+        console.warn("MediaRecorder encountered an error:", e);
       };
 
       recordingStartRef.current = Date.now();

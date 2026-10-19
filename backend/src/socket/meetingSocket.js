@@ -271,7 +271,7 @@ const registerMeetingHandlers = (io, socket) => {
       }
 
       if (leaveResult?.wasRecording) {
-        io.to(meetingId).emit("meeting:recording-stopped", {
+        socket.to(meetingId).emit("meeting:recording-stopped", {
           userId: socket.user.id,
         });
       }
@@ -521,7 +521,7 @@ const registerMeetingHandlers = (io, socket) => {
       }
 
       if (disconnectResult?.wasRecording) {
-        io.to(meetingId).emit("meeting:recording-stopped", {
+        socket.to(meetingId).emit("meeting:recording-stopped", {
           userId: socket.user.id,
         });
       }
