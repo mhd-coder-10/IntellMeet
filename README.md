@@ -58,7 +58,7 @@ IntellMeet is an enterprise-grade virtual collaboration platform designed for hi
 [ Express 5 & Socket.io Signaling ]                                             |
    |-- Redis (In-Memory Room State & Cluster Pub/Sub)                           |
    |-- MongoDB Atlas (User Profiles, Meetings, Workspaces, Kanban Tasks)        |
-   |-- Google Gemini 8.5 Flash (Speech-to-Text, Summaries, Action Items)         |
+   |-- Google Gemini 8.5 Flash (Speech-to-Text, Summaries, Action Items)        |
    |-- Cloudinary Storage (Meeting Recordings & File Attachments)               |
    |-- Sentry SDK (Real-Time Backend Exception & Crash Capture)                 |
    +-- Prometheus Scraper (/metrics Telemetry Pipeline -> Grafana Dashboard)    |
