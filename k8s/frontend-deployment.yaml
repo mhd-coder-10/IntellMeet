@@ -23,8 +23,8 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: intellmeet-frontend:latest
-          imagePullPolicy: IfNotPresent
+          image: mhd100/intellmeet-frontend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
               name: http
