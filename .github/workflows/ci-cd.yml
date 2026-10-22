@@ -1,3 +1,4 @@
+
 name: IntellMeet CI/CD Pipeline
 
 on:
@@ -69,9 +70,9 @@ jobs:
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL || 'http://localhost:5100/api' }}
 
-  # Stage 3: Docker Images Verification (Multi-Stage Build Validation)
-  docker-verification:
-    name: Docker Build Integrity
+  # Stage 3: Docker Images Build & Push to Docker Hub
+  docker-build-push:
+    name: Docker Build & Push to Docker Hub
     needs: [backend-ci, frontend-ci]
     runs-on: ubuntu-latest
 
@@ -82,29 +83,40 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Backend Docker Image
+      # When main branch is pushed, then log in to Docker Hub
+      - name: Log in to Docker Hub
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Backend image build & push
+      - name: Build and Push Backend Image
         uses: docker/build-push-action@v5
         with:
           context: ./backend
           file: ./backend/Dockerfile
-          push: false
-          tags: intellmeet-backend:test
-          load: true
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/intellmeet-backend:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/intellmeet-backend:${{ github.sha }}
 
-      - name: Build Frontend Docker Image (SPA + Nginx)
+      # Frontend image (SPA + Nginx) build & push
+      - name: Build and Push Frontend Image (Nginx)
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
-          push: false
-          tags: intellmeet-frontend:test
-          load: true
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/intellmeet-frontend:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/intellmeet-frontend:${{ github.sha }}
 
   # Stage 4: CD Deployment Trigger (Render Backend + Vercel Frontend)
-  # Triggers only on push to main branch after all tests & builds pass
   deploy:
     name: Continuous Deployment (Render & Vercel)
-    needs: [docker-verification]
+    needs: [docker-build-push]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
@@ -116,7 +128,7 @@ jobs:
             curl -fsSL -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
             echo "Render deployment successfully triggered!"
           else
-            echo "ℹRENDER_DEPLOY_HOOK_URL secret not set. Skipping automated Render webhook trigger."
+            echo "ℹ RENDER_DEPLOY_HOOK_URL secret not set. Skipping automated Render webhook trigger."
           fi
 
       - name: Trigger Frontend Deployment on Vercel
@@ -126,5 +138,5 @@ jobs:
             curl -fsSL -X POST "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}"
             echo "Vercel deployment successfully triggered!"
           else
-            echo "VERCEL_DEPLOY_HOOK_URL secret not set. Skipping automated Vercel webhook trigger."
+            echo "ℹ VERCEL_DEPLOY_HOOK_URL secret not set. Skipping automated Vercel webhook trigger."
           fi

@@ -5,8 +5,6 @@
 #   docker compose down            # Stop all services
 #   docker compose logs -f         # View live streaming logs
 
-version: "3.8"
-
 services:
 
   # Redis - Session caching, meeting state & real-time messaging
