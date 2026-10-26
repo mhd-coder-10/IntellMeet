@@ -1,0 +1,107 @@
+# IntellMeet Helm Chart - Example Values Configuration
+namespace: intellmeet
+
+# Backend Service Configuration
+backend:
+  replicaCount: 2
+  image:
+    repository: mhd100/intellmeet-backend
+    tag: latest
+    pullPolicy: Always
+  service:
+    name: backend
+    type: ClusterIP
+    port: 5100
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 75
+
+# Frontend Service Configuration
+frontend:
+  replicaCount: 2
+  image:
+    repository: mhd100/intellmeet-frontend
+    tag: latest
+    pullPolicy: Always
+  service:
+    name: frontend-service
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+# Redis Cache Configuration
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: 7-alpine
+  service:
+    type: ClusterIP
+    port: 6379
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Ingress Controller Configuration
+ingress:
+  enabled: true
+  className: nginx
+  host: intellmeet.local
+  tls:
+    enabled: false
+    secretName: intellmeet-tls
+
+# Application Environment Variables
+config:
+  nodeEnv: production
+  port: "5100"
+  clientUrl: "http://localhost:5173"
+  redisHost: "redis-service"
+  redisPort: "6379"
+  cloudinaryFolder: "IntellMeet_AI_Powered_Meeting"
+  jwtAccessTokenExpiry: "7d"
+  jwtRefreshTokenExpiry: "15m"
+  smtpService: "gmail"
+  emailFrom: '"IntellMeet" <your_email@gmail.com>'
+
+# Sensitive Secrets (Placeholders only - Keep real passwords inside values.yaml)
+secrets:
+  MONGO_URI: "mongodb+srv://<DB_USER>:<DB_PASSWORD>@cluster.mongodb.net/intellmeet?retryWrites=true&w=majority"
+  JWT_SECRET: "your_jwt_secret_key_minimum_32_characters_here"
+  JWT_REFRESH_SECRET: "your_jwt_refresh_secret_key_minimum_32_characters_here"
+  JWT_ACCESS_TOKEN_EXPIRY: "7d"
+  JWT_REFRESH_TOKEN_EXPIRY: "1d"
+  CLOUDINARY_CLOUD_NAME: "your_cloudinary_cloud_name"
+  CLOUDINARY_API_KEY: "your_cloudinary_api_key"
+  CLOUDINARY_API_SECRET: "your_cloudinary_api_secret"
+  CLOUDINARY_FOLDER: "IntellMeet_AI_Powered_Meeting"
+  GEMINI_API_KEY: "your_gemini_api_key_here"
+  SMTP_SERVICE: "gmail"
+  SMTP_USER: "your_email@gmail.com"
+  SMTP_PASS: "your_email_app_password"
+  EMAIL_FROM: "IntellMeet <your_email@gmail.com>"

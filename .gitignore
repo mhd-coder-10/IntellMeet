@@ -32,6 +32,12 @@ Thumbs.db
 *.tmp
 *.temp
 
-# Uploads
-backend/uploads/
+# K8s Secrets
+k8s/secrets.yaml
 
+# Helm Secrets
+helm/intellmeet/values.yaml
+
+# Allow to show in Public code 
+!k8s/secrets.example.yaml
+!helm/intellmeet/values.example.yaml

@@ -29,21 +29,21 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: backend-service
+                name: backend
                 port:
                   number: {{ .Values.backend.service.port }}
           - path: /socket.io
             pathType: Prefix
             backend:
               service:
-                name: backend-service
+                name: backend
                 port:
                   number: {{ .Values.backend.service.port }}
           - path: /uploads
             pathType: Prefix
             backend:
               service:
-                name: backend-service
+                name: backend
                 port:
                   number: {{ .Values.backend.service.port }}
           - path: /
