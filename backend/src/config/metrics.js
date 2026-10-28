@@ -86,8 +86,8 @@ const metricsMiddleware = (req, res, next) => {
 
 // Route handler for Prometheus scraper (/metrics) with Secure Basic Auth
 const metricsEndpointHandler = async (req, res) => {
-  const metricsUser = process.env.METRICS_USER;
-  const metricsPass = process.env.METRICS_PASS;
+  const metricsUser = process.env.METRICS_USER || "admin";
+  const metricsPass = process.env.METRICS_PASS || "admin";
 
   const authHeader = req.headers.authorization;
   if (!authHeader) {
@@ -129,5 +129,6 @@ module.exports = {
   setActiveMeetings,
   setActiveParticipants,
 };
+
 
 
