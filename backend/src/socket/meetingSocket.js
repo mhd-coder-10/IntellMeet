@@ -189,6 +189,8 @@ const registerMeetingHandlers = (io, socket) => {
         username: socket.user.username,
         name: socket.user.name,
         profilePicture: socket.user.profilePicture,
+        isMuted: false,
+        isVideoOn: true,
         totalUsers: users.length,
       });
 

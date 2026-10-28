@@ -123,7 +123,10 @@ export default function MeetingRoom() {
     setRecordingState,
   ]);
 
-  const isHost = meeting?.host._id === user?.id;
+  const isHost = Boolean(
+    (meeting?.host?._id || meeting?.host)?.toString() ===
+    (user?.id || (user as { _id?: string })?._id)?.toString()
+  );
 
   // Collect all participants available for @mentions in meeting chat
   const mentionCandidates = useMemo(() => {
@@ -1137,7 +1140,7 @@ export default function MeetingRoom() {
                   profilePicture={peer.profilePicture}
                   isMuted={peer.isMuted}
                   isVideoOn={peer.isVideoOn}
-                  isHost={meeting?.host?._id === peer.userId}
+                  isHost={(meeting?.host?._id || meeting?.host)?.toString() === peer.userId?.toString()}
                   isSpeaking={isSpeaking(peer.userId)}
                   isScreenSharing={Boolean(
                     screenSharingUserId &&

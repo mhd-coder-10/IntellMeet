@@ -857,18 +857,7 @@ const joinMeeting = async (meetingId, userId) => {
     await userRepo.recordMeetingJoin(userId, meetingId);
   }
 
-  const roomManager = require("../webrtc/roomManager")
-  const existingRoomUser = roomManager
-    .getRoomUsers(meetingId)
-    .find((u) => u.userId.toString() === userId.toString())
-
-  if (!existingRoomUser) {
-    roomManager.addUserToRoom(meetingId, userId, null, {
-      name: user?.name || "A user",
-      username: user?.username || "unknown",
-      profilePicture: user?.profilePicture || "",
-    })
-  }
+  // Note: Active WebRTC room socket presence is tracked exclusively by real-time meetingSocket handlers
 
   const updated = await meetingRepo.findById(meetingId)
 

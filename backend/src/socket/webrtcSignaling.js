@@ -1,15 +1,22 @@
-
 // Handles WebRTC signaling messages between peers
 // Forwards offers, answers and ice candidates to target users
 
 const roomManager = require("../webrtc/roomManager");
 
 const forwardToUser = (io, meetingId, toUserId, event, payload) => {
-  const room = roomManager.getRoom(meetingId);
-  if (!room) return;
+  const mIdStr = meetingId ? meetingId.toString() : "";
+  const room = roomManager.getRoom(mIdStr);
+  if (!room) {
+    console.warn(`[Signaling] Room ${mIdStr} not found for event ${event}`);
+    return;
+  }
 
-  const targetUser = room.users.get(toUserId.toString());
-  if (!targetUser) return;
+  const targetIdStr = toUserId ? toUserId.toString() : "";
+  const targetUser = room.users.get(targetIdStr);
+  if (!targetUser || !targetUser.socketId) {
+    console.warn(`[Signaling] Target user ${targetIdStr} (socketId: ${targetUser?.socketId}) not ready in room ${mIdStr} for ${event}`);
+    return;
+  }
 
   io.to(targetUser.socketId).emit(event, payload);
 };
