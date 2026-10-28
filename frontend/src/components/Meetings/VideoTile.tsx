@@ -32,6 +32,7 @@ export function VideoTile({
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [, setTrackStateTick] = useState(0);
+  const [imgError, setImgError] = useState(false);
 
   // Listen to track lifecycle changes (unmute, mute, ended) so UI syncs immediately
   useEffect(() => {
@@ -134,10 +135,13 @@ export function VideoTile({
         .some((t) => t.readyState === "live" && t.enabled)
   );
 
-  // Show avatar overlay when camera is off, or when no stream, or when camera is supposed to be on but no live video track exists yet
+  // Show avatar overlay when:
+  // 1. No stream exists
+  // 2. For local user: camera toggle is turned off (!isVideoOn)
+  // 3. For remote peer: not screen sharing, and camera toggle is off while no live video track is arriving
   const showAvatar =
     !hasStream ||
-    (!isScreenSharing && (!isVideoOn || (!isLocal && !hasLiveVideoTrack)));
+    (!isScreenSharing && (isLocal ? !isVideoOn : (!isVideoOn && !hasLiveVideoTrack)));
 
   return (
     <div
@@ -173,14 +177,15 @@ export function VideoTile({
       {/* Avatar or Profile Picture Overlay when Camera is Off or No Video Track */}
       {showAvatar && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-900">
-          {profilePicture ? (
+          {profilePicture && !imgError ? (
             <img
               src={profilePicture}
               alt={name}
+              onError={() => setImgError(true)}
               className="w-20 h-20 rounded-full object-cover shadow-lg ring-4 ring-blue-500/20"
             />
           ) : (
-            <div className="w-20 h-20 rounded-full bg-blue-600 flex items-center justify-center text-white text-2xl font-bold shadow-lg ring-4 ring-blue-500/20">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-blue-700 to-indigo-500 flex items-center justify-center text-white text-2xl font-bold shadow-lg ring-4 ring-blue-500/20">
               {(name || "U").charAt(0).toUpperCase()}
             </div>
           )}

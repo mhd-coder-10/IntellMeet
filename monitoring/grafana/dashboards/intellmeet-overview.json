@@ -1,4 +1,4 @@
-{
+﻿{
   "annotations": {
     "list": []
   },
@@ -22,7 +22,7 @@
       "type": "row"
     },
     {
-      "datasource": "Prometheus",
+      "datasource": "grafanacloud-azureibis535-prom",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -80,7 +80,7 @@
       ]
     },
     {
-      "datasource": "Prometheus",
+      "datasource": "grafanacloud-azureibis535-prom",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -136,7 +136,7 @@
       ]
     },
     {
-      "datasource": "Prometheus",
+      "datasource": "grafanacloud-azureibis535-prom",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -200,11 +200,11 @@
         "y": 6
       },
       "id": 101,
-      "title": "⚡ API Traffic, Latency & Error Rate",
+      "title": "âš¡ API Traffic, Latency & Error Rate",
       "type": "row"
     },
     {
-      "datasource": "Prometheus",
+      "datasource": "grafanacloud-azureibis535-prom",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -225,14 +225,14 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(intellmeet_http_requests_total[1m])) by (method)",
+          "expr": "sum(rate(intellmeet_http_requests_total[5m])) by (method)",
           "legendFormat": "{{method}}",
           "refId": "A"
         }
       ]
     },
     {
-      "datasource": "Prometheus",
+      "datasource": "grafanacloud-azureibis535-prom",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -253,12 +253,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(intellmeet_http_request_duration_seconds_bucket[1m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(intellmeet_http_request_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p95 Latency",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(intellmeet_http_request_duration_seconds_bucket[1m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(intellmeet_http_request_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p99 Latency",
           "refId": "B"
         }
@@ -277,7 +277,7 @@
       "type": "row"
     },
     {
-      "datasource": "Prometheus",
+      "datasource": "grafanacloud-azureibis535-prom",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -310,7 +310,7 @@
       ]
     },
     {
-      "datasource": "Prometheus",
+      "datasource": "grafanacloud-azureibis535-prom",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -331,7 +331,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "rate(intellmeet_process_cpu_seconds_total[1m])",
+          "expr": "rate(intellmeet_process_cpu_seconds_total[5m])",
           "legendFormat": "Process CPU",
           "refId": "A"
         }

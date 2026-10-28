@@ -302,13 +302,11 @@ const registerMeetingHandlers = (io, socket) => {
       isVideoOn,
     });
 
-    if (updated) {
-      io.to(meetingId).emit("meeting:media-state-changed", {
-        userId: socket.user.id,
-        isMuted: updated.isMuted,
-        isVideoOn: updated.isVideoOn,
-      });
-    }
+    io.to(meetingId).emit("meeting:media-state-changed", {
+      userId: socket.user.id,
+      isMuted: typeof isMuted === "boolean" ? isMuted : (updated?.isMuted ?? false),
+      isVideoOn: typeof isVideoOn === "boolean" ? isVideoOn : (updated?.isVideoOn ?? true),
+    });
   });
 
   // Broadcast screen share start to all participants in meeting room

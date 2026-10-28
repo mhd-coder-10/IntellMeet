@@ -1,4 +1,4 @@
-# Grafana Datasource Auto-Provisioning for IntellMeet
+﻿# Grafana Datasource Auto-Provisioning for IntellMeet
 apiVersion: 1
 
 datasources:
@@ -7,6 +7,16 @@ datasources:
     access: proxy
     url: http://prometheus:9090
     isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 5s
+      httpMethod: POST
+
+  - name: grafanacloud-azureibis535-prom
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: false
     editable: true
     jsonData:
       timeInterval: 5s

@@ -84,43 +84,29 @@ const createFallbackStream = (): MediaStream => {
   return stream;
 };
 
-// Rebuilds and syncs active tracks from all receivers into a stable MediaStream
+// Rebuilds and syncs active tracks from all receivers into a fresh MediaStream reference
 const syncPeerStream = (
   pc: RTCPeerConnection,
   userId: string,
   updatePeer: (id: string, updates: Partial<VideoPeer>) => void
 ) => {
-  const currentPeer = useMeetingStore
-    .getState()
-    .peers.find((p) => String(p.userId) === String(userId));
-
-  const stream = currentPeer?.stream || new MediaStream();
-  let changed = false;
-
+  const activeTracks: MediaStreamTrack[] = [];
   pc.getReceivers().forEach((r) => {
     if (r.track && r.track.readyState !== "ended") {
-      const exists = stream.getTracks().some((t) => t.id === r.track.id);
-      if (!exists) {
-        stream.addTrack(r.track);
-        changed = true;
-      }
+      activeTracks.push(r.track);
     }
   });
 
-  // Remove tracks that have ended
-  stream.getTracks().forEach((track) => {
-    const isReceiverTrack = pc
-      .getReceivers()
-      .some((r) => r.track && r.track.id === track.id && r.track.readyState !== "ended");
-    if (!isReceiverTrack) {
-      stream.removeTrack(track);
-      changed = true;
-    }
-  });
+  const hasLiveVideo = activeTracks.some((t) => t.kind === "video" && t.readyState === "live");
 
-  if (!currentPeer?.stream || changed) {
-    updatePeer(userId, { stream });
-  }
+  // Always create a fresh MediaStream instance with current active tracks
+  // This guarantees React detects a reference change and re-renders VideoTile immediately!
+  const freshStream = new MediaStream(activeTracks);
+
+  updatePeer(userId, {
+    stream: freshStream,
+    ...(hasLiveVideo ? { isVideoOn: true } : {}),
+  });
 };
 
 export function useWebRTC(socket: Socket | null, meetingId: string | null) {
@@ -330,8 +316,14 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   // Toggle camera: replaces video track with real camera or null
   const toggleVideo = useCallback(
     async (enabled: boolean) => {
-      const currentStream = useMeetingStore.getState().localStream;
-      if (!currentStream) return;
+      let currentStream = useMeetingStore.getState().localStream;
+      if (!currentStream) {
+        try {
+          currentStream = await startLocalStream();
+        } catch {
+          currentStream = createFallbackStream();
+        }
+      }
 
       const audioTracks = currentStream.getAudioTracks();
       currentStream.getVideoTracks().forEach((track) => track.stop());
@@ -361,12 +353,27 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
           videoSender.replaceTrack(newTrack).catch((err) => {
             console.warn(`[WebRTC] replaceTrack error for peer ${peerId}:`, err);
           });
+        } else if (newTrack) {
+          try {
+            pc.addTrack(newTrack, freshStream);
+          } catch (e) {
+            console.warn(`[WebRTC] addTrack fallback error for peer ${peerId}:`, e);
+          }
         }
       });
 
       setLocalStream(freshStream);
+      useMeetingStore.getState().setIsVideoOn(enabled);
+
+      if (socket && meetingIdRef.current) {
+        socket.emit("meeting:media-state", {
+          meetingId: meetingIdRef.current,
+          isMuted: isMutedRef.current,
+          isVideoOn: enabled,
+        });
+      }
     },
-    [setLocalStream]
+    [setLocalStream, socket, startLocalStream]
   );
 
   // Socket event listeners: stable lifecycle attached once per (socket, meetingId)
@@ -658,16 +665,22 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       }
     };
 
-    // On media state change, update mute/video states without destroying the active audio/video stream
+    // On media state change, update mute/video states and re-sync peer stream
     const handleMediaStateChanged = ({
       userId,
       isMuted: remoteMuted,
       isVideoOn: remoteVideoOn,
     }: any) => {
-      updatePeer(userId, {
+      const uId = String(userId);
+      updatePeer(uId, {
         isMuted: remoteMuted,
         isVideoOn: remoteVideoOn,
       });
+
+      const pc = peerConnections.current.get(uId);
+      if (pc) {
+        syncPeerStream(pc, uId, updatePeer);
+      }
     };
 
     // Screen share started: update store and re-sync presenter stream instantly

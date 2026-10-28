@@ -93,32 +93,24 @@ export function MeetingControls({
   const toggleVideo = async () => {
     if (isScreenSharing) return;
 
-    if (!localStream && onToggleVideo) {
-      try {
-        await onToggleVideo(true);
-      } catch {
-        toast.error("Failed to access camera");
-      }
-      return;
-    }
-
     const newState = !isVideoOn;
 
     try {
-      await onToggleVideo?.(newState);
+      if (onToggleVideo) {
+        await onToggleVideo(newState);
+      }
+      setIsVideoOn(newState);
+
+      socket?.emit("meeting:media-state", {
+        meetingId,
+        isMuted,
+        isVideoOn: newState,
+      });
     } catch (error) {
       console.error("Video toggle failed:", error);
-      setIsVideoOn(!newState);
-      return;
+      toast.error("Failed to access camera");
+      setIsVideoOn(isVideoOn);
     }
-
-    setIsVideoOn(newState);
-
-    socket?.emit("meeting:media-state", {
-      meetingId,
-      isMuted,
-      isVideoOn: newState,
-    });
   };
 
   return (
