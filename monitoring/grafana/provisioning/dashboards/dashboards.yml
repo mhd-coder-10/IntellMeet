@@ -1,4 +1,4 @@
-# Grafana Dashboard Provider Configuration
+﻿# Grafana Dashboard Provider Configuration
 apiVersion: 1
 
 providers:
@@ -9,4 +9,4 @@ providers:
     disableDeletion: false
     editable: true
     options:
-      path: /etc/grafana/provisioning/dashboards/json
+      path: /etc/grafana/dashboards

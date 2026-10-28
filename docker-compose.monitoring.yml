@@ -1,4 +1,4 @@
-# Docker Compose file for IntellMeet Prometheus & Grafana Monitoring Stack
+﻿# Docker Compose file for IntellMeet Prometheus & Grafana Monitoring Stack
 version: "3.8"
 
 services:
@@ -35,7 +35,7 @@ services:
     volumes:
       - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards/json:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus

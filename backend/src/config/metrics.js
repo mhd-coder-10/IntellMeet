@@ -1,4 +1,4 @@
-// Prometheus metrics exporter and instrumentation for IntellMeet
+﻿// Prometheus metrics exporter and instrumentation for IntellMeet
 // Collects Node.js runtime metrics, HTTP request latency, active calls, and socket sessions
 
 const client = require("prom-client");
@@ -65,7 +65,7 @@ const metricsMiddleware = (req, res, next) => {
     const durationSeconds = diff[0] + diff[1] / 1e9;
 
     // Normalize route to avoid high cardinality (e.g. /meetings/123 -> /meetings/:id)
-    let route = req.baseUrl + (req.route?.path || req.path);
+    let route = (req.baseUrl || "") + (req.route?.path || req.path || "");
     if (!route || route === "") route = req.path || "unknown";
 
     // Clean up IDs in route pattern
@@ -84,14 +84,32 @@ const metricsMiddleware = (req, res, next) => {
   next();
 };
 
-// Route handler for Prometheus scraper (/metrics)
+// Route handler for Prometheus scraper (/metrics) with Secure Basic Auth
 const metricsEndpointHandler = async (req, res) => {
-  try {
-    res.set("Content-Type", register.contentType);
-    res.end(await register.metrics());
-  } catch (err) {
-    res.status(500).end(err.message);
+  const metricsUser = process.env.METRICS_USER;
+  const metricsPass = process.env.METRICS_PASS;
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    res.setHeader("WWW-Authenticate", 'Basic realm="IntellMeet Metrics"');
+    return res.status(401).send("Authentication required for Prometheus metrics");
   }
+
+  const [scheme, encoded] = authHeader.split(" ");
+  if (scheme === "Basic" && encoded) {
+    const [user, pass] = Buffer.from(encoded, "base64").toString().split(":");
+    if (user === metricsUser && pass === metricsPass) {
+      try {
+        res.set("Content-Type", register.contentType);
+        return res.end(await register.metrics());
+      } catch (err) {
+        return res.status(500).end(err.message);
+      }
+    }
+  }
+
+  res.setHeader("WWW-Authenticate", 'Basic realm="IntellMeet Metrics"');
+  return res.status(401).send("Invalid metrics credentials");
 };
 
 // Helper methods to update socket and meeting gauges
@@ -111,3 +129,5 @@ module.exports = {
   setActiveMeetings,
   setActiveParticipants,
 };
+
+

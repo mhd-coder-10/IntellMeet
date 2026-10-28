@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -9,35 +11,62 @@
   "panels": [
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "id": 100,
-      "title": "🎥 Real-Time Meeting & Socket Observability",
+      "title": "Real-Time Meeting & Socket Observability",
       "type": "row"
     },
     {
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "blue", "value": null },
-              { "color": "green", "value": 1 },
-              { "color": "orange", "value": 10 }
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              },
+              {
+                "color": "orange",
+                "value": 10
+              }
             ]
           }
         }
       },
-      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 1 },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
       "id": 1,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "title": "Active Live Meetings",
@@ -54,25 +83,47 @@
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "purple", "value": null },
-              { "color": "green", "value": 1 },
-              { "color": "yellow", "value": 25 }
+              {
+                "color": "purple",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              },
+              {
+                "color": "yellow",
+                "value": 25
+              }
             ]
           }
         }
       },
-      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 1 },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
       "id": 2,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       },
       "title": "Connected Socket.io Clients",
       "type": "stat",
@@ -88,25 +139,47 @@
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "teal", "value": null },
-              { "color": "green", "value": 1 },
-              { "color": "orange", "value": 50 }
+              {
+                "color": "teal",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              },
+              {
+                "color": "orange",
+                "value": 50
+              }
             ]
           }
         }
       },
-      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 1 },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
       "id": 3,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       },
       "title": "Total Call Participants",
       "type": "stat",
@@ -120,7 +193,12 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
       "id": 101,
       "title": "⚡ API Traffic, Latency & Error Rate",
       "type": "row"
@@ -129,11 +207,19 @@
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "lineInterpolation": "smooth" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
           "unit": "reqps"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
       "id": 4,
       "title": "HTTP Request Throughput (Req/sec)",
       "type": "timeseries",
@@ -149,11 +235,19 @@
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "lineInterpolation": "smooth" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
           "unit": "s"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
       "id": 5,
       "title": "API Latency (p95 & p99)",
       "type": "timeseries",
@@ -172,20 +266,33 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
       "id": 102,
-      "title": "🖥️ Node.js Runtime & System Health",
+      "title": "Node.js Runtime & System Health",
       "type": "row"
     },
     {
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "lineInterpolation": "smooth" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
           "unit": "bytes"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
       "id": 6,
       "title": "Node.js Heap Memory Usage",
       "type": "timeseries",
@@ -206,11 +313,19 @@
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "lineInterpolation": "smooth" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
           "unit": "percentunit"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
       "id": 7,
       "title": "CPU Usage (Process & System)",
       "type": "timeseries",
@@ -226,10 +341,23 @@
   "refresh": "5s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["intellmeet", "production", "webrtc", "observability"],
-  "time": { "from": "now-15m", "to": "now" },
+  "tags": [
+    "intellmeet",
+    "production",
+    "webrtc",
+    "observability"
+  ],
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
   "timepicker": {
-    "refresh_intervals": ["5s", "10s", "30s", "1m"]
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m"
+    ]
   },
   "timezone": "browser",
   "title": "IntellMeet - Production Overview",
