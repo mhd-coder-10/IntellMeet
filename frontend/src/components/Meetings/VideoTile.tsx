@@ -117,7 +117,7 @@ export function VideoTile({
 
   // Show avatar overlay when:
   // 1. No stream exists
-  // 2. Camera toggle is explicitly off (!isVideoOn) — PRIMARY authoritative source
+  // 2. Camera toggle is explicitly off (!isVideoOn) ï¿½ PRIMARY authoritative source
   // 3. Camera is supposedly on but no live frames yet (only for remote, prevents black box on connection setup)
   const showAvatar =
     !hasStream ||

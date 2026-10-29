@@ -320,7 +320,7 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   const toggleVideo = useCallback(
     async (enabled: boolean) => {
       // INSTANT: Emit socket state change immediately so remote peers see avatar/video switch
-      // right away — before any async camera operations that could take 200-800ms
+      // right away ï¿½ before any async camera operations that could take 200-800ms
       if (socket && meetingIdRef.current) {
         socket.emit("meeting:media-state", {
           meetingId: meetingIdRef.current,
