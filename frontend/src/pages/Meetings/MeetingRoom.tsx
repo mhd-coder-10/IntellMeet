@@ -100,6 +100,7 @@ export default function MeetingRoom() {
     queryFn: () => getMeetingById(id!),
     enabled: !!id,
     refetchOnMount: "always",
+    refetchInterval: 3000,
     staleTime: 0,
   });
 
@@ -307,79 +308,6 @@ export default function MeetingRoom() {
   }, [recordedResult]);
 
 
-  // Listen for host ending or auto-concluded meeting
-  useEffect(() => {
-    if (!socket) return;
-
-    const handleMeetingEnded = async (data: {
-      meetingId: string;
-      message: string;
-    }) => {
-      if (data.meetingId === id) {
-        if (isEndingMeetingRef.current) return;
-        toast.info(data.message || "Meeting has been ended");
-
-        const activeRecording = isRecorderActive();
-        const hasPendingRecordings = pendingRecordingsRef.current.length > 0;
-
-        if (activeRecording || hasPendingRecordings) {
-          try {
-            if (activeRecording) {
-              const fresh = await stopRecording(true);
-              if (fresh) {
-                pendingRecordingsRef.current.push(fresh);
-              }
-            }
-            const recordingsToSave = [...pendingRecordingsRef.current];
-            pendingRecordingsRef.current = [];
-            clearRecordedResult();
-            if (recordingsToSave.length > 0 && id) {
-              for (let i = 0; i < recordingsToSave.length; i++) {
-                const rec = recordingsToSave[i];
-                const currentCount = meeting?.recordings?.length || 0;
-                const partNumber = currentCount + i + 1;
-                const finalDuration = rec.duration > 0 ? rec.duration : 1;
-                await uploadMeetingRecording(id, rec.blob, {
-                  title: `${meeting?.title || "Meeting"} - Recording ${partNumber}`,
-                  duration: finalDuration,
-                  size: rec.size,
-                });
-              }
-            }
-          } catch (recErr) {
-            console.error("Save recording on meeting ended error:", recErr);
-          }
-        }
-
-        stopLocalStream();
-        closeAllPeers();
-        resetMeeting();
-        await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
-        await queryClient.invalidateQueries({ queryKey: ["meetings"] });
-        navigate(`/meetings/${id}/details`, { replace: true });
-      }
-    };
-
-    socket.on("meeting:ended", handleMeetingEnded);
-
-    return () => {
-      socket.off("meeting:ended", handleMeetingEnded);
-    };
-  }, [
-    socket,
-    id,
-    isRecording,
-    isRecorderActive,
-    stopRecording,
-    clearRecordedResult,
-    meeting?.title,
-    stopLocalStream,
-    closeAllPeers,
-    resetMeeting,
-    navigate,
-    queryClient,
-  ]);
-
   // Stable refs for values used inside socket event handlers
   // These refs let us read current values without adding them to the dependency array,
   // which would cause the effect to re-run (and briefly drop events) on every re-render.
@@ -400,6 +328,96 @@ export default function MeetingRoom() {
 
   const meetingHostRef = useRef(meeting?.host);
   meetingHostRef.current = meeting?.host;
+
+  const meetingTitleRef = useRef(meeting?.title);
+  meetingTitleRef.current = meeting?.title;
+
+  const meetingRecordingsRef = useRef(meeting?.recordings);
+  meetingRecordingsRef.current = meeting?.recordings;
+
+  const stopLocalStreamRef = useRef(stopLocalStream);
+  stopLocalStreamRef.current = stopLocalStream;
+
+  const closeAllPeersRef = useRef(closeAllPeers);
+  closeAllPeersRef.current = closeAllPeers;
+
+  const resetMeetingRef = useRef(resetMeeting);
+  resetMeetingRef.current = resetMeeting;
+
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+
+  // Listen for host ending or auto-concluded meeting
+  useEffect(() => {
+    if (!socket || !id) return;
+
+    const onMeetingTerminated = async (message?: string) => {
+      if (isEndingMeetingRef.current) return;
+      isEndingMeetingRef.current = true;
+      toast.info(message || "Meeting has been ended");
+
+      const activeRecording = isRecorderActiveRef.current();
+      const hasPendingRecordings = pendingRecordingsRef.current.length > 0;
+
+      if (activeRecording || hasPendingRecordings) {
+        try {
+          if (activeRecording) {
+            const fresh = await stopRecordingRef.current(true);
+            if (fresh) {
+              pendingRecordingsRef.current.push(fresh);
+            }
+          }
+          const recordingsToSave = [...pendingRecordingsRef.current];
+          pendingRecordingsRef.current = [];
+          clearRecordedResultRef.current();
+          if (recordingsToSave.length > 0 && id) {
+            for (let i = 0; i < recordingsToSave.length; i++) {
+              const rec = recordingsToSave[i];
+              const currentCount = meetingRecordingsRef.current?.length || 0;
+              const partNumber = currentCount + i + 1;
+              const finalDuration = rec.duration > 0 ? rec.duration : 1;
+              await uploadMeetingRecording(id, rec.blob, {
+                title: `${meetingTitleRef.current || "Meeting"} - Recording ${partNumber}`,
+                duration: finalDuration,
+                size: rec.size,
+              });
+            }
+          }
+        } catch (recErr) {
+          console.error("Save recording on meeting ended error:", recErr);
+        }
+      }
+
+      stopLocalStreamRef.current();
+      closeAllPeersRef.current();
+      resetMeetingRef.current();
+      await queryClient.invalidateQueries({ queryKey: ["meeting", id] });
+      await queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      navigateRef.current(`/meetings/${id}/details`, { replace: true });
+    };
+
+    const handleMeetingEnded = (data: { meetingId: string; message?: string }) => {
+      if (String(data.meetingId) === String(id)) {
+        onMeetingTerminated(data.message || "Meeting has been ended by the host");
+      }
+    };
+
+    const handleMeetingUpdated = (data: { meetingId?: string; status?: string; meeting?: { status?: string; _id?: string } }) => {
+      const targetId = String(data.meetingId || data.meeting?._id || "");
+      const newStatus = data.status || data.meeting?.status;
+      if (targetId === String(id) && (newStatus === "completed" || newStatus === "cancelled" || newStatus === "expired")) {
+        onMeetingTerminated("Meeting has concluded");
+      }
+    };
+
+    socket.on("meeting:ended", handleMeetingEnded);
+    socket.on("meeting:updated", handleMeetingUpdated);
+
+    return () => {
+      socket.off("meeting:ended", handleMeetingEnded);
+      socket.off("meeting:updated", handleMeetingUpdated);
+    };
+  }, [socket, id, queryClient]);
 
   // Listen for screen share and recording events across the room
   // Dependency array is intentionally minimal (only socket + stable setters + id) so the
@@ -449,33 +467,47 @@ export default function MeetingRoom() {
           }
         };
 
-        const handleRecordStop = async (data?: { userId?: string }) => {
-          // If current user is host and actively recording, ignore remote stop signals from other departing users
-            const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
-            if (isHostRef.current && isRecorderActiveRef.current()) {
-              if (data?.userId && String(data.userId) !== String(currentUserId)) {
-                console.log("Ignoring remote recording-stopped event from peer:", data.userId);
-                return;
-              }
-            }
+    const handleRecordStop = async (data?: { userId?: string }) => {
+      // If current user is host and actively recording, ignore remote stop signals from other departing users
+      const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
+      if (isHostRef.current && isRecorderActiveRef.current()) {
+        if (data?.userId && String(data.userId) !== String(currentUserId)) {
+          console.log("Ignoring remote recording-stopped event from peer:", data.userId);
+          return;
+        }
+      }
 
-            setRecordingState(false);
-            setRemoteIsPaused(false);
-            setRemoteRecordingTime(0);
-            toast.info("Recording stopped");
-            playRecordingStopChime();
-              if (isRecorderActiveRef.current()) {
-                try {
-                  const result = await stopRecordingRef.current(true);
-                  if (result) {
-                    pendingRecordingsRef.current.push(result);
-                  }
-                  clearRecordedResultRef.current();
-                } catch (err) {
-                  console.error("Delegated recorder stop error:", err);
-                }
-              }
-            };
+      // For non-host members, also verify the event is actually from the recording user or host
+      // If a regular participant leaves, they should NEVER stop the host's ongoing recording!
+      const activeRecordingUserId = useMeetingStore.getState().recordingUserId;
+      const hostUserId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
+      if (data?.userId) {
+        const senderIdStr = String(data.userId);
+        const isFromRecorder = activeRecordingUserId && senderIdStr === String(activeRecordingUserId);
+        const isFromHost = hostUserId && senderIdStr === String(hostUserId);
+        if (!isFromRecorder && !isFromHost) {
+          console.log("Ignoring recording-stopped from regular departing participant:", data.userId);
+          return;
+        }
+      }
+
+      setRecordingState(false);
+      setRemoteIsPaused(false);
+      setRemoteRecordingTime(0);
+      toast.info("Recording stopped");
+      playRecordingStopChime();
+      if (isRecorderActiveRef.current()) {
+        try {
+          const result = await stopRecordingRef.current(true);
+          if (result) {
+            pendingRecordingsRef.current.push(result);
+          }
+          clearRecordedResultRef.current();
+        } catch (err) {
+          console.error("Delegated recorder stop error:", err);
+        }
+      }
+    };
 
             const handleRecordPaused = (data?: { currentSeconds?: number }) => {
               setRemoteIsPaused(true);
@@ -518,37 +550,47 @@ export default function MeetingRoom() {
               }
             };
 
-            const handleUserJoined = (data: {
-              userId: string;
-              name?: string;
-              username?: string;
-            }) => {
-              const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
-              if (currentUserId && String(data.userId) === String(currentUserId)) return;
+    const handleUserJoined = (data: {
+      userId: string;
+      name?: string;
+      username?: string;
+    }) => {
+      const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
+      if (currentUserId && String(data.userId) === String(currentUserId)) return;
 
-              const userIdStr = String(data.userId);
-              const now = Date.now();
-              const lastNotified = lastJoinToastRef.current.get(userIdStr) || 0;
-              if (now - lastNotified < 3000) return; // Ignore duplicate join events within 3 seconds
-              lastJoinToastRef.current.set(userIdStr, now);
-              lastLeftToastRef.current.delete(userIdStr);
+      const userIdStr = String(data.userId);
 
-              const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
-              const isHostJoining = hostId && userIdStr === String(hostId);
-              const peer = useMeetingStore
-                .getState()
-                .peers.find((p) => String(p.userId) === userIdStr);
-              const displayName =
-                data.name ||
-                data.username ||
-                peer?.name ||
-                peer?.username ||
-                (isHostJoining ? "Host" : "Participant");
+      // Check if peer is ALREADY in peers list
+      const alreadyPresent = useMeetingStore
+        .getState()
+        .peers.some((p) => String(p.userId) === userIdStr);
+      if (alreadyPresent) {
+        // Peer is already in meeting (e.g. tab switch or reconnect) — do not toast!
+        return;
+      }
 
-              toast.info(`${displayName} joined`, {
-                id: `user-joined-${userIdStr}`,
-              });
-            };
+      const now = Date.now();
+      const lastNotified = lastJoinToastRef.current.get(userIdStr) || 0;
+      if (now - lastNotified < 5000) return; // Ignore duplicate join events within 5 seconds
+      lastJoinToastRef.current.set(userIdStr, now);
+      lastLeftToastRef.current.delete(userIdStr);
+
+      const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
+      const isHostJoining = hostId && userIdStr === String(hostId);
+      const peer = useMeetingStore
+        .getState()
+        .peers.find((p) => String(p.userId) === userIdStr);
+      const displayName =
+        data.name ||
+        data.username ||
+        peer?.name ||
+        peer?.username ||
+        (isHostJoining ? "Host" : "Participant");
+
+      toast.info(`${displayName} joined`, {
+        id: `user-joined-${userIdStr}`,
+      });
+    };
 
             const handleUserLeft = (data: {
               userId: string;
@@ -645,8 +687,10 @@ const executeLeaveMeeting = async () => {
   const recordingsToSave = [...pendingRecordingsRef.current];
   pendingRecordingsRef.current = [];
   clearRecordedResult();
-  setRecordingState(false);
-  socket?.emit("meeting:recording-stopped", { meetingId: id });
+  if (isHost || activeRecording) {
+    setRecordingState(false);
+    socket?.emit("meeting:recording-stopped", { meetingId: id });
+  }
 
   if (recordingsToSave.length > 0 && id) {
     const toastId = toast.loading("Saving meeting recording to Cloudinary... Please wait.");

@@ -142,10 +142,12 @@ const registerMeetingHandlers = (io, socket) => {
 
       socket.join(meetingId);
       const graceKey = `${meetingId}:${socket.user.id.toString()}`;
-      if (disconnectGraceTimers.has(graceKey)) {
+      const wasInGrace = disconnectGraceTimers.has(graceKey);
+      if (wasInGrace) {
         clearTimeout(disconnectGraceTimers.get(graceKey));
         disconnectGraceTimers.delete(graceKey);
       }
+      const wasAlreadyInRoom = roomManager.isUserInRoom(meetingId, socket.user.id);
       socket.meetingId = meetingId;
 
       // Cancel empty room grace timer if participant or host joins/rejoins
@@ -191,15 +193,18 @@ const registerMeetingHandlers = (io, socket) => {
 
       const users = roomManager.getRoomUsers(meetingId);
 
-      io.to(meetingId).emit("meeting:user-joined", {
-        userId: socket.user.id,
-        username: socket.user.username,
-        name: socket.user.name,
-        profilePicture: socket.user.profilePicture,
-        isMuted: false,
-        isVideoOn: true,
-        totalUsers: users.length,
-      });
+      // Only emit meeting:user-joined if this is genuinely a fresh join, NOT a reconnect or tab-switch
+      if (!wasAlreadyInRoom && !wasInGrace) {
+        io.to(meetingId).emit("meeting:user-joined", {
+          userId: socket.user.id,
+          username: socket.user.username,
+          name: socket.user.name,
+          profilePicture: socket.user.profilePicture,
+          isMuted: false,
+          isVideoOn: true,
+          totalUsers: users.length,
+        });
+      }
 
       const recordingUserId = roomManager.getRecordingUser(meetingId);
       const recordingStartedAt = roomManager.getRecordingStartedAt(meetingId);
@@ -272,7 +277,7 @@ const registerMeetingHandlers = (io, socket) => {
       try {
         const userRepo = require("../repositories/userRepository");
         await userRepo.recordMeetingLeave(socket.user.id, meetingId);
-      } catch (err) { }
+      } catch (err) {}
 
       socket.leave(meetingId);
       const leaveResult = roomManager.removeUserFromRoom(meetingId, socket.user.id);
@@ -357,8 +362,19 @@ const registerMeetingHandlers = (io, socket) => {
   });
 
   // Broadcast recording stop to participants
-  socket.on("meeting:recording-stopped", ({ meetingId }) => {
+  socket.on("meeting:recording-stopped", async ({ meetingId }) => {
     if (!meetingId) return;
+
+    const currentRecordingUser = roomManager.getRecordingUser(meetingId);
+    const isHost = await isHostUser(meetingId, socket.user.id);
+    const isRecorder = currentRecordingUser && currentRecordingUser.toString() === socket.user.id.toString();
+
+    // ONLY the user who started the recording or the meeting host is allowed to stop recording!
+    if (!isHost && !isRecorder) {
+      console.log(`[Meeting Recording] Ignored unauthorized recording-stopped from ${socket.user.id}`);
+      return;
+    }
+
     roomManager.clearRecordingUser(meetingId);
 
     socket.to(meetingId).emit("meeting:recording-stopped", {
@@ -499,12 +515,48 @@ const registerMeetingHandlers = (io, socket) => {
   // Handle host ending meeting via socket
   socket.on("meeting:end", async ({ meetingId }) => {
     if (!meetingId) return;
-    cancelEmptyRoomGraceTimer(meetingId);
-    io.to(meetingId).emit("meeting:ended", {
-      meetingId,
+    const mIdStr = meetingId.toString();
+    cancelEmptyRoomGraceTimer(mIdStr);
+
+    try {
+      const meetingRepo = require("../repositories/meetingRepository");
+      const meeting = await meetingRepo.findById(mIdStr);
+      if (meeting && meeting.status === "ongoing") {
+        const now = new Date();
+        await meetingRepo.updateById(mIdStr, {
+          status: "completed",
+          endedAt: now,
+          startedAt: meeting.startedAt || now,
+        });
+        const userRepo = require("../repositories/userRepository");
+        await userRepo.closeMeetingSessions(mIdStr, now);
+        await clearMeetingCaches(mIdStr, socket.user.id);
+      }
+    } catch (err) {
+      console.error("[Meeting End] DB update error:", err.message);
+    }
+
+    io.to(mIdStr).emit("meeting:ended", {
+      meetingId: mIdStr,
       message: "Meeting has been ended by the host",
     });
-    io.in(meetingId).socketsLeave(meetingId);
+    io.emit("meeting:ended", {
+      meetingId: mIdStr,
+      message: "Meeting has been ended by the host",
+    });
+    io.to(mIdStr).emit("meeting:updated", {
+      meetingId: mIdStr,
+      status: "completed",
+    });
+    io.emit("meeting:updated", {
+      meetingId: mIdStr,
+      status: "completed",
+    });
+
+    roomManager.clearRoom(mIdStr);
+    setTimeout(() => {
+      io.in(mIdStr).socketsLeave(mIdStr);
+    }, 1000);
   });
 
   // Meeting disconnect handler to clean up DB and notify host
@@ -536,7 +588,7 @@ const registerMeetingHandlers = (io, socket) => {
         try {
           const userRepo = require("../repositories/userRepository");
           await userRepo.recordMeetingLeave(userId, meetingId);
-        } catch (err) { }
+        } catch (err) {}
 
         const disconnectResult = roomManager.removeUserFromRoom(meetingId, userId);
 
@@ -562,10 +614,10 @@ const registerMeetingHandlers = (io, socket) => {
         if (disconnectResult?.remainingCount === 0) {
           scheduleEmptyRoomCompletion(io, meetingId, userId);
         }
-    }, 30000);
+      }, 30000);
 
-  disconnectGraceTimers.set(graceKey, timer);
-}
+      disconnectGraceTimers.set(graceKey, timer);
+    }
   });
 };
 
