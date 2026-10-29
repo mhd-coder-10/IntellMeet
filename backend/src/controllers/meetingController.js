@@ -221,10 +221,10 @@ const endMeeting = async (req, res) => {
 
         const io = req.app.get("io");
         if (io) {
-                const mId = req.params.id;
-                io.to(mId).emit("meeting:ended", {
-                    meetingId: mId,
-                    message: "Meeting has been ended by the host",
+            const mId = req.params.id;
+            io.to(mId).emit("meeting:ended", {
+                meetingId: mId,
+                message: "Meeting has been ended by the host",
             });
             io.emit("meeting:ended", {
                 meetingId: mId,

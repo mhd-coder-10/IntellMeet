@@ -31,14 +31,19 @@ const sendSignupOtp = async ({ email, name }) => {
     otp,
   })
 
-  // Send Email asynchronously without blocking response
-  emailService.sendSignupOtpEmail({
-    recipientEmail: normalizedEmail,
-    recipientName: name || "there",
-    otp,
-  }).catch((err) => {
-    console.warn(`[OTP Delivery Warning] Direct SMTP send failed (${err.message}). OTP created in database: ${otp}`)
-  })
+  // Send Email with OTP (await delivery so failure is properly reported to user)
+  try {
+    await emailService.sendSignupOtpEmail({
+      recipientEmail: normalizedEmail,
+      recipientName: name || "there",
+      otp,
+    });
+  } catch (err) {
+    console.error(`[OTP Delivery Error] SMTP send failed: ${err.message}`);
+    const error = new Error(`Failed to deliver verification code email: ${err.message}`);
+    error.statusCode = 500;
+    throw error;
+  }
 
   return {
     message: "Verification code sent to your email",

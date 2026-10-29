@@ -560,34 +560,34 @@ export default function MeetingRoom() {
       }
     };
 
-    const handleUserJoined = (data: {
-      userId: string;
-      name?: string;
-      username?: string;
-    }) => {
-      const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
-      if (currentUserId && String(data.userId) === String(currentUserId)) return;
+      const handleUserJoined = (data: {
+        userId: string;
+        name?: string;
+        username?: string;
+      }) => {
+        const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
+        if (currentUserId && String(data.userId) === String(currentUserId)) return;
 
-      const userIdStr = String(data.userId);
-      const now = Date.now();
-      const lastNotified = lastJoinToastRef.current.get(userIdStr) || 0;
-      if (now - lastNotified < 3000) return; // Ignore duplicate events within 3 seconds
-      lastJoinToastRef.current.set(userIdStr, now);
+        const userIdStr = String(data.userId);
+        const now = Date.now();
+        const lastNotified = lastJoinToastRef.current.get(userIdStr) || 0;
+        if (now - lastNotified < 3000) return; // Ignore duplicate events within 3 seconds
+        lastJoinToastRef.current.set(userIdStr, now);
 
-      const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
-      const isHostJoining = hostId && userIdStr === String(hostId);
-      const peer = useMeetingStore
-        .getState()
-        .peers.find((p) => String(p.userId) === userIdStr);
-      const displayName =
-        data.name ||
-        data.username ||
-        peer?.name ||
-        peer?.username ||
-        (isHostJoining ? "Host" : "Participant");
+        const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
+        const isHostJoining = hostId && userIdStr === String(hostId);
+        const peer = useMeetingStore
+          .getState()
+          .peers.find((p) => String(p.userId) === userIdStr);
+        const displayName =
+          data.name ||
+          data.username ||
+          peer?.name ||
+          peer?.username ||
+          (isHostJoining ? "Host" : "Participant");
 
-      toast.info(`${displayName} joined`);
-    };
+        toast.info(`${displayName} joined`);
+      };
 
     const handleUserLeft = (data: {
       userId: string;
@@ -597,56 +597,56 @@ export default function MeetingRoom() {
       const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
       if (currentUserId && String(data.userId) === String(currentUserId)) return;
 
-      const userIdStr = String(data.userId);
-      const now = Date.now();
-      const lastNotified = lastLeftToastRef.current.get(userIdStr) || 0;
-      if (now - lastNotified < 3000) return; // Ignore duplicate events within 3 seconds
-      lastLeftToastRef.current.set(userIdStr, now);
-      // Reset join cooldown so if this member rejoins later, they get announced cleanly!
-      lastJoinToastRef.current.delete(userIdStr);
+        const userIdStr = String(data.userId);
+        const now = Date.now();
+        const lastNotified = lastLeftToastRef.current.get(userIdStr) || 0;
+        if (now - lastNotified < 3000) return; // Ignore duplicate events within 3 seconds
+        lastLeftToastRef.current.set(userIdStr, now);
+        // Reset join cooldown so if this member rejoins later, they get announced cleanly!
+        lastJoinToastRef.current.delete(userIdStr);
 
-      const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
-      const isHostLeaving = hostId && userIdStr === String(hostId);
-      const peer = useMeetingStore
-        .getState()
-        .peers.find((p) => String(p.userId) === userIdStr);
-      const displayName =
-        data.name ||
-        data.username ||
-        peer?.name ||
-        peer?.username ||
-        (isHostLeaving ? "Host" : "Participant");
+        const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
+        const isHostLeaving = hostId && userIdStr === String(hostId);
+        const peer = useMeetingStore
+          .getState()
+          .peers.find((p) => String(p.userId) === userIdStr);
+        const displayName =
+          data.name ||
+          data.username ||
+          peer?.name ||
+          peer?.username ||
+          (isHostLeaving ? "Host" : "Participant");
 
-      toast.info(`${displayName} left`);
-    };
-
-      socket.on("meeting:screen-share-started", handleScreenStart);
-      socket.on("meeting:screen-share-stopped", handleScreenStop);
-      socket.on("meeting:recording-started", handleRecordStart);
-      socket.on("meeting:recording-stopped", handleRecordStop);
-      socket.on("meeting:recording-paused", handleRecordPaused);
-      socket.on("meeting:recording-resumed", handleRecordResumed);
-      socket.on("meeting:recording-sync", handleRecordSync);
-      socket.on("meeting:user-joined", handleUserJoined);
-      socket.on("meeting:user-left", handleUserLeft);
-      socket.on("meeting:force-mute", handleForceMute);
-      socket.on("meeting:force-mute-all", handleForceMute);
-
-      return () => {
-        socket.off("meeting:screen-share-started", handleScreenStart);
-        socket.off("meeting:screen-share-stopped", handleScreenStop);
-        socket.off("meeting:recording-started", handleRecordStart);
-        socket.off("meeting:recording-stopped", handleRecordStop);
-        socket.off("meeting:recording-paused", handleRecordPaused);
-        socket.off("meeting:recording-resumed", handleRecordResumed);
-        socket.off("meeting:recording-sync", handleRecordSync);
-        socket.off("meeting:user-joined", handleUserJoined);
-        socket.off("meeting:user-left", handleUserLeft);
-        socket.off("meeting:force-mute", handleForceMute);
-        socket.off("meeting:force-mute-all", handleForceMute);
+        toast.info(`${displayName} left`);
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [socket, id, setScreenSharingUserId, setRecordingState]);
+
+    socket.on("meeting:screen-share-started", handleScreenStart);
+    socket.on("meeting:screen-share-stopped", handleScreenStop);
+    socket.on("meeting:recording-started", handleRecordStart);
+    socket.on("meeting:recording-stopped", handleRecordStop);
+    socket.on("meeting:recording-paused", handleRecordPaused);
+    socket.on("meeting:recording-resumed", handleRecordResumed);
+    socket.on("meeting:recording-sync", handleRecordSync);
+    socket.on("meeting:user-joined", handleUserJoined);
+    socket.on("meeting:user-left", handleUserLeft);
+    socket.on("meeting:force-mute", handleForceMute);
+    socket.on("meeting:force-mute-all", handleForceMute);
+
+    return () => {
+      socket.off("meeting:screen-share-started", handleScreenStart);
+      socket.off("meeting:screen-share-stopped", handleScreenStop);
+      socket.off("meeting:recording-started", handleRecordStart);
+      socket.off("meeting:recording-stopped", handleRecordStop);
+      socket.off("meeting:recording-paused", handleRecordPaused);
+      socket.off("meeting:recording-resumed", handleRecordResumed);
+      socket.off("meeting:recording-sync", handleRecordSync);
+      socket.off("meeting:user-joined", handleUserJoined);
+      socket.off("meeting:user-left", handleUserLeft);
+      socket.off("meeting:force-mute", handleForceMute);
+      socket.off("meeting:force-mute-all", handleForceMute);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, id, setScreenSharingUserId, setRecordingState]);
 
   const executeLeaveMeeting = async () => {
     if (isLeavingMeetingRef.current || isEndingMeetingRef.current) return;

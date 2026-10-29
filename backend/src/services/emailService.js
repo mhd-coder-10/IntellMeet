@@ -38,9 +38,9 @@ const getTransporter = async () => {
         user: smtpUser,
         pass: smtpPass,
       },
-      connectionTimeout: 6000,
-      greetingTimeout: 6000,
-      socketTimeout: 7000,
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
     });
     console.log(`[Email Service] Transporter initialized with SMTP host: ${smtpHost} (${smtpUser})`);
   } else if (smtpUser && smtpPass) {
@@ -49,33 +49,27 @@ const getTransporter = async () => {
     if (service) {
       transporter = nodemailer.createTransport({
         service,
-        pool: true,
-        maxConnections: 3,
-        maxMessages: 100,
         auth: {
           user: smtpUser,
           pass: smtpPass,
         },
-        connectionTimeout: 4000,
-        greetingTimeout: 4000,
-        socketTimeout: 5000,
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 20000,
       });
       console.log(`[Email Service] Transporter initialized with service: ${service} (${smtpUser})`);
     } else {
       transporter = nodemailer.createTransport({
         host: "smtp.gmail.com",
-        port: 587,
-        secure: false,
-        pool: true,
-        maxConnections: 3,
-        maxMessages: 100,
+        port: 465,
+        secure: true,
         auth: {
           user: smtpUser,
           pass: smtpPass,
         },
-        connectionTimeout: 4000,
-        greetingTimeout: 4000,
-        socketTimeout: 5000,
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 20000,
       });
       console.log(`[Email Service] Transporter initialized with smtp.gmail.com (${smtpUser})`);
     }
@@ -106,6 +100,16 @@ const getTransporter = async () => {
 
 const getClientBaseUrl = () => {
   return process.env.CLIENT_URL || "http://localhost:5173";
+};
+
+// Returns authorized sender address matching configured SMTP credentials
+const getFromAddress = () => {
+  return (
+    process.env.EMAIL_FROM ||
+    (process.env.SMTP_USER
+      ? `"IntellMeet" <${process.env.SMTP_USER}>`
+      : '"IntellMeet" <notifications@intellmeet.com>')
+  );
 };
 
 // Formats date and time into readable string (e.g., "Wednesday, Oct 14, 2026 at 7:30 PM")
@@ -264,11 +268,7 @@ const sendMeetingInviteEmail = async ({
       accentColor: "#2563eb",
     });
 
-    const fromAddress =
-      process.env.EMAIL_FROM ||
-      (process.env.SMTP_USER
-        ? `"IntellMeet" <${process.env.SMTP_USER}>`
-        : '"IntellMeet" <notifications@intellmeet.com>');
+    const fromAddress = getFromAddress();
 
     await t.sendMail({
       from: fromAddress,
@@ -325,11 +325,7 @@ const sendWorkspaceInviteEmail = async ({
       accentColor: "#4f46e5",
     });
 
-    const fromAddress =
-      process.env.EMAIL_FROM ||
-      (process.env.SMTP_USER
-        ? `"IntellMeet" <${process.env.SMTP_USER}>`
-        : '"IntellMeet" <notifications@intellmeet.com>');
+    const fromAddress = getFromAddress();
 
     await t.sendMail({
       from: fromAddress,
@@ -385,7 +381,7 @@ const sendMeetingUpdatedEmail = async ({
     });
 
     await t.sendMail({
-      from: process.env.EMAIL_FROM || '"IntellMeet" <notifications@intellmeet.com>',
+      from: getFromAddress(),
       to: recipientEmail,
       subject: `🔄 Meeting Details Updated: "${meeting.title}"`,
       html,
@@ -429,7 +425,7 @@ const sendMeetingCancelledEmail = async ({
     });
 
     await t.sendMail({
-      from: process.env.EMAIL_FROM || '"IntellMeet" <notifications@intellmeet.com>',
+      from: getFromAddress(),
       to: recipientEmail,
       subject: `❌ Meeting Cancelled: "${meeting.title}"`,
       html,
@@ -473,7 +469,7 @@ const sendMeetingEndedEmail = async ({
     });
 
     await t.sendMail({
-      from: process.env.EMAIL_FROM || '"IntellMeet" <notifications@intellmeet.com>',
+      from: getFromAddress(),
       to: recipientEmail,
       subject: `📋 Meeting Summary & Recording: "${meeting.title}"`,
       html,
@@ -518,7 +514,7 @@ const sendMeetingExpiredEmail = async ({
     });
 
     await t.sendMail({
-      from: process.env.EMAIL_FROM || '"IntellMeet" <notifications@intellmeet.com>',
+      from: getFromAddress(),
       to: recipientEmail,
       subject: `⚠️ Meeting Expired: "${meeting.title}"`,
       html,
@@ -560,7 +556,7 @@ const sendWorkspaceJoinRequestAcceptedEmail = async ({
     });
 
     await t.sendMail({
-      from: process.env.EMAIL_FROM || '"IntellMeet" <notifications@intellmeet.com>',
+      from: getFromAddress(),
       to: recipientEmail,
       subject: `🎉 Workspace Join Request Approved: "${team.name}"`,
       html,
@@ -605,7 +601,7 @@ const sendWorkspaceRoleUpdatedEmail = async ({
     });
 
     await t.sendMail({
-      from: process.env.EMAIL_FROM || '"IntellMeet" <notifications@intellmeet.com>',
+      from: getFromAddress(),
       to: recipientEmail,
       subject: `🛡️ Workspace Role Updated: ${roleTitle} in "${team.name}"`,
       html,
@@ -647,7 +643,7 @@ const sendWorkspaceRemovedEmail = async ({
     });
 
     await t.sendMail({
-      from: process.env.EMAIL_FROM || '"IntellMeet" <notifications@intellmeet.com>',
+      from: getFromAddress(),
       to: recipientEmail,
       subject: `ℹ️ Notice: Removed from workspace "${team.name}"`,
       html,
@@ -668,11 +664,7 @@ const sendSignupOtpEmail = async ({
   try {
     const t = await getTransporter();
 
-    const fromAddress =
-      process.env.EMAIL_FROM ||
-      (process.env.SMTP_USER
-        ? `"IntellMeet" <${process.env.SMTP_USER}>`
-        : '"IntellMeet" <notifications@intellmeet.com>');
+    const fromAddress = getFromAddress();
 
     const html = `
     <!DOCTYPE html>
@@ -719,17 +711,12 @@ const sendSignupOtpEmail = async ({
     </html>
     `;
 
-    await Promise.race([
-      t.sendMail({
-        from: fromAddress,
-        to: recipientEmail,
-        subject: `🔐 Your IntellMeet Verification Code: ${otp}`,
-        html,
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Email server connection timed out")), 6000)
-      ),
-    ]);
+    await t.sendMail({
+      from: fromAddress,
+      to: recipientEmail,
+      subject: `🔐 Your IntellMeet Verification Code: ${otp}`,
+      html,
+    });
 
     console.log(`[Email Service] Signup OTP sent to ${recipientEmail}`);
   } catch (err) {
