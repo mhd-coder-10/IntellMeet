@@ -97,7 +97,7 @@ const syncPeerStream = (
     }
   });
 
-  const hasLiveVideo = activeTracks.some((t) => t.kind === "video" && t.readyState === "live");
+  const hasLiveVideo = activeTracks.some((t) => t.kind === "video" && t.readyState === "live" && !t.muted);
 
   // Always create a fresh MediaStream instance with current active tracks
   // This guarantees React detects a reference change and re-renders VideoTile immediately!
@@ -250,6 +250,14 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       } else {
         pc.addTransceiver("video", { direction: "sendrecv" });
       }
+
+      pc.oniceconnectionstatechange = () => {
+        console.log(`[WebRTC] ICE state with ${peerInfo.userId}: ${pc.iceConnectionState}`);
+        if (pc.iceConnectionState === "failed") {
+          console.warn(`[WebRTC] ICE restart triggered for ${peerInfo.userId}`);
+          pc.restartIce?.();
+        }
+      };
 
       pc.onicecandidate = (event) => {
         if (event.candidate && socket) {
@@ -458,7 +466,8 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     };
 
     // Handle another user joining the meeting room
-    const handleUserJoined = async (data: {
+    // Handle another user joining the meeting room (they will initiate callPeer to us)
+    const handleUserJoined = (data: {
       userId: string;
       name?: string;
       username?: string;
@@ -472,7 +481,7 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
 
       console.log("[WebRTC] meeting:user-joined received for:", data.name, uId);
 
-      // 1. Immediately add the newly joined user to peers in Zustand store so their card appears right away
+      // 1. Immediately register newly joined participant in Zustand store
       addPeer({
         userId: uId,
         name: data.name || data.username || "Participant",
@@ -482,29 +491,8 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
         isVideoOn: data.isVideoOn ?? true,
       });
 
-      // 2. Proactively establish connection if local stream is already active
-      let stream = localStreamRef.current;
-      if (!stream) {
-        try {
-          stream = await startLocalStream();
-        } catch {
-          stream = createFallbackStream();
-        }
-      }
-
-      if (stream) {
-        await callPeer(
-          {
-            userId: uId,
-            name: data.name || data.username || "Participant",
-            username: data.username || "user",
-            profilePicture: data.profilePicture,
-            isMuted: data.isMuted ?? false,
-            isVideoOn: data.isVideoOn ?? true,
-          },
-          stream
-        );
-      }
+      // Note: We do NOT initiate callPeer here! The joining peer calls us via handleJoined.
+      // This completely prevents simultaneous dual offers (glare) and connection teardown.
     };
 
     // Handle a participant leaving the room
@@ -548,13 +536,26 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
         }
       }
 
-      // Cleanly close any previous connection for this peer before answering
+      // If an existing PC is already stable and active, cleanly replace it or handle glare
       const existingPc = peerConnections.current.get(peerId);
       if (existingPc) {
-        try {
-          existingPc.close();
-        } catch {}
-        peerConnections.current.delete(peerId);
+        if (existingPc.signalingState === "have-local-offer") {
+          const isPolite = String(myId) < String(peerId);
+          if (!isPolite) {
+            console.warn(`[WebRTC] Glare with peer ${peerId}. Impolite, ignoring incoming offer.`);
+            return;
+          }
+          try {
+            await existingPc.setLocalDescription({ type: "rollback" } as any);
+          } catch (e) {
+            console.warn("[WebRTC] Rollback error:", e);
+          }
+        } else {
+          try {
+            existingPc.close();
+          } catch {}
+          peerConnections.current.delete(peerId);
+        }
       }
       pendingCandidatesRef.current.delete(peerId);
 

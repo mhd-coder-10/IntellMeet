@@ -105,6 +105,24 @@ export function VideoTile({
     };
   }, [stream, isLocal]);
 
+  const hasStream = !!stream;
+
+  // Check if stream has an actual live, unmuted video track
+  const hasLiveVideoTrack = Boolean(
+    stream &&
+      stream
+        .getVideoTracks()
+        .some((t) => t.readyState === "live" && !t.muted && t.enabled)
+  );
+
+  // Show avatar overlay when:
+  // 1. No stream exists
+  // 2. Camera toggle is turned off (!isVideoOn)
+  // 3. For remote peer: active live video frames have not yet arrived (!hasLiveVideoTrack)
+  const showAvatar =
+    !hasStream ||
+    (!isScreenSharing && (!isVideoOn || (!isLocal && !hasLiveVideoTrack)));
+
   // Attach stream to video element when stream or video state changes
   useEffect(() => {
     const video = videoRef.current;
@@ -123,25 +141,8 @@ export function VideoTile({
         playPromise.catch(() => {});
       }
     }
-  }, [stream, isVideoOn, isScreenSharing]);
+  }, [stream, isVideoOn, isScreenSharing, hasLiveVideoTrack]);
 
-  const hasStream = !!stream;
-
-  // Check if stream has an actual live video track
-  const hasLiveVideoTrack = Boolean(
-    stream &&
-      stream
-        .getVideoTracks()
-        .some((t) => t.readyState === "live" && t.enabled)
-  );
-
-  // Show avatar overlay when:
-  // 1. No stream exists
-  // 2. For local user: camera toggle is turned off (!isVideoOn)
-  // 3. For remote peer: not screen sharing, and camera toggle is off while no live video track is arriving
-  const showAvatar =
-    !hasStream ||
-    (!isScreenSharing && (isLocal ? !isVideoOn : (!isVideoOn && !hasLiveVideoTrack)));
 
   return (
     <div

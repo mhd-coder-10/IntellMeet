@@ -15,6 +15,8 @@ let ioInstance = null
 
 const initSocket = (httpServer) => {
   const io = new Server(httpServer, {
+    pingTimeout: 60000,
+    pingInterval: 25000,
     cors: {
       origin: (origin, callback) => callback(null, true),
       credentials: true,

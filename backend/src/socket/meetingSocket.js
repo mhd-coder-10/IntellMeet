@@ -3,6 +3,8 @@
 // Also handles screen sharing and recording broadcasts
 
 const roomManager = require("../webrtc/roomManager");
+// Disconnect grace timers: `${meetingId}:${userId}` -> NodeJS.Timeout to prevent transient mobile disconnect flap
+const disconnectGraceTimers = new Map();
 const notificationService = require("../services/notificationService");
 const { deleteCacheByPattern } = require("../utils/redisHelpers");
 
@@ -139,6 +141,11 @@ const registerMeetingHandlers = (io, socket) => {
       }
 
       socket.join(meetingId);
+      const graceKey = `${meetingId}:${socket.user.id.toString()}`;
+      if (disconnectGraceTimers.has(graceKey)) {
+        clearTimeout(disconnectGraceTimers.get(graceKey));
+        disconnectGraceTimers.delete(graceKey);
+      }
       socket.meetingId = meetingId;
 
       // Cancel empty room grace timer if participant or host joins/rejoins
@@ -252,6 +259,11 @@ const registerMeetingHandlers = (io, socket) => {
   // Handle user leaving a meeting
   socket.on("meeting:leave", async ({ meetingId }) => {
     if (!meetingId) return;
+    const graceKey = `${meetingId}:${socket.user.id.toString()}`;
+    if (disconnectGraceTimers.has(graceKey)) {
+      clearTimeout(disconnectGraceTimers.get(graceKey));
+      disconnectGraceTimers.delete(graceKey);
+    }
 
     try {
       const meetingRepo = require("../repositories/meetingRepository");
@@ -496,46 +508,53 @@ const registerMeetingHandlers = (io, socket) => {
   });
 
   // Meeting disconnect handler to clean up DB and notify host
+  // Meeting disconnect handler with 15-second grace period for mobile / Wi-Fi network blips
   socket.on("disconnect", async () => {
     const meetingId = socket.meetingId;
+    const userId = socket.user?.id ? socket.user.id.toString() : null;
 
-    if (meetingId) {
-      try {
-        const meetingRepo = require("../repositories/meetingRepository");
-        const meeting = await meetingRepo.findById(meetingId);
+    if (meetingId && userId) {
+      const graceKey = `${meetingId}:${userId}`;
+      if (disconnectGraceTimers.has(graceKey)) {
+        clearTimeout(disconnectGraceTimers.get(graceKey));
+        disconnectGraceTimers.delete(graceKey);
+      }
+
+      const timer = setTimeout(async () => {
+        disconnectGraceTimers.delete(graceKey);
 
         try {
           const userRepo = require("../repositories/userRepository");
-          await userRepo.recordMeetingLeave(socket.user.id, meetingId);
+          await userRepo.recordMeetingLeave(userId, meetingId);
         } catch (err) {}
-      } catch (err) {
-        console.log("Disconnect cleanup error:", err.message);
-      }
 
-      const disconnectResult = roomManager.removeUserFromRoom(meetingId, socket.user.id);
+        const disconnectResult = roomManager.removeUserFromRoom(meetingId, userId);
 
-      if (disconnectResult?.wasScreenSharing) {
-        io.to(meetingId).emit("meeting:screen-share-stopped", {
-          userId: socket.user.id,
+        if (disconnectResult?.wasScreenSharing) {
+          io.to(meetingId).emit("meeting:screen-share-stopped", {
+            userId,
+          });
+        }
+
+        if (disconnectResult?.wasRecording) {
+          socket.to(meetingId).emit("meeting:recording-stopped", {
+            userId,
+          });
+        }
+
+        io.to(meetingId).emit("meeting:user-left", {
+          userId,
+          name: socket.user.name,
+          username: socket.user.username,
         });
-      }
 
-      if (disconnectResult?.wasRecording) {
-        socket.to(meetingId).emit("meeting:recording-stopped", {
-          userId: socket.user.id,
-        });
-      }
+        // If room is now empty (all participants left), start 5-min grace period before completing
+        if (disconnectResult?.remainingCount === 0) {
+          scheduleEmptyRoomCompletion(io, meetingId, userId);
+        }
+      }, 15000);
 
-      io.to(meetingId).emit("meeting:user-left", {
-        userId: socket.user.id,
-        name: socket.user.name,
-        username: socket.user.username,
-      });
-
-      // If room is now empty (all participants left), start 5-min grace period before completing
-      if (disconnectResult?.remainingCount === 0) {
-        scheduleEmptyRoomCompletion(io, meetingId, socket.user.id);
-      }
+      disconnectGraceTimers.set(graceKey, timer);
     }
   });
 };
