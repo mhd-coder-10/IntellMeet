@@ -474,15 +474,15 @@ export default function MeetingRoom() {
       }
     };
 
-      const handleRecordStop = async (data?: { userId?: string }) => {
-        // If current user is host and actively recording, ignore remote stop signals from other departing users
-        const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
-        if (isHostRef.current && isRecorderActiveRef.current()) {
-          if (data?.userId && String(data.userId) !== String(currentUserId)) {
-            console.log("Ignoring remote recording-stopped event from peer:", data.userId);
-            return;
-          }
+    const handleRecordStop = async (data?: { userId?: string }) => {
+      // If current user is host and actively recording, ignore remote stop signals from other departing users
+      const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
+      if (isHostRef.current && isRecorderActiveRef.current()) {
+        if (data?.userId && String(data.userId) !== String(currentUserId)) {
+          console.log("Ignoring remote recording-stopped event from peer:", data.userId);
+          return;
         }
+      }
 
       // For non-host members, also verify the event is actually from the recording user or host
       // If a regular participant leaves, they should NEVER stop the host's ongoing recording!
@@ -557,96 +557,96 @@ export default function MeetingRoom() {
       }
     };
 
-    const handleUserJoined = (data: {
-      userId: string;
-      name?: string;
-      username?: string;
-    }) => {
-      const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
-      if (currentUserId && String(data.userId) === String(currentUserId)) return;
+      const handleUserJoined = (data: {
+        userId: string;
+        name?: string;
+        username?: string;
+      }) => {
+        const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
+        if (currentUserId && String(data.userId) === String(currentUserId)) return;
 
-      const userIdStr = String(data.userId);
+        const userIdStr = String(data.userId);
 
-      // If user was already tracked as active in this call, ignore duplicate toast on tab-switch/reconnect
-      if (activeMembersRef.current.has(userIdStr)) {
-        return;
-      }
-      activeMembersRef.current.add(userIdStr);
+        // If user was already tracked as active in this call, ignore duplicate toast on tab-switch/reconnect
+        if (activeMembersRef.current.has(userIdStr)) {
+          return;
+        }
+        activeMembersRef.current.add(userIdStr);
 
-      const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
-      const isHostJoining = hostId && userIdStr === String(hostId);
-      const peer = useMeetingStore
-        .getState()
-        .peers.find((p) => String(p.userId) === userIdStr);
-      const displayName =
-        data.name ||
-        data.username ||
-        peer?.name ||
-        peer?.username ||
-        (isHostJoining ? "Host" : "Participant");
+        const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
+        const isHostJoining = hostId && userIdStr === String(hostId);
+        const peer = useMeetingStore
+          .getState()
+          .peers.find((p) => String(p.userId) === userIdStr);
+        const displayName =
+          data.name ||
+          data.username ||
+          peer?.name ||
+          peer?.username ||
+          (isHostJoining ? "Host" : "Participant");
 
-      toast.info(`${displayName} joined`, {
-        id: `user-joined-${userIdStr}`,
-      });
-    };
+        toast.info(`${displayName} joined`, {
+          id: `user-joined-${userIdStr}`,
+        });
+      };
 
-    const handleUserLeft = (data: {
-      userId: string;
-      name?: string;
-      username?: string;
-    }) => {
-      const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
-      if (currentUserId && String(data.userId) === String(currentUserId)) return;
+      const handleUserLeft = (data: {
+        userId: string;
+        name?: string;
+        username?: string;
+      }) => {
+        const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
+        if (currentUserId && String(data.userId) === String(currentUserId)) return;
 
-      const userIdStr = String(data.userId);
+        const userIdStr = String(data.userId);
 
-      // Remove from active tracked members so if they rejoin later, they get a fresh toast
-      activeMembersRef.current.delete(userIdStr);
+        // Remove from active tracked members so if they rejoin later, they get a fresh toast
+        activeMembersRef.current.delete(userIdStr);
 
-      const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
-      const isHostLeaving = hostId && userIdStr === String(hostId);
-      const peer = useMeetingStore
-        .getState()
-        .peers.find((p) => String(p.userId) === userIdStr);
-      const displayName =
-        data.name ||
-        data.username ||
-        peer?.name ||
-        peer?.username ||
-        (isHostLeaving ? "Host" : "Participant");
+        const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
+        const isHostLeaving = hostId && userIdStr === String(hostId);
+        const peer = useMeetingStore
+          .getState()
+          .peers.find((p) => String(p.userId) === userIdStr);
+        const displayName =
+          data.name ||
+          data.username ||
+          peer?.name ||
+          peer?.username ||
+          (isHostLeaving ? "Host" : "Participant");
 
-      toast.info(`${displayName} left`, {
-        id: `user-left-${userIdStr}`,
-      });
-    };
+        toast.info(`${displayName} left`, {
+          id: `user-left-${userIdStr}`,
+        });
+      };
 
-    socket.on("meeting:screen-share-started", handleScreenStart);
-    socket.on("meeting:screen-share-stopped", handleScreenStop);
-    socket.on("meeting:recording-started", handleRecordStart);
-    socket.on("meeting:recording-stopped", handleRecordStop);
-    socket.on("meeting:recording-paused", handleRecordPaused);
-    socket.on("meeting:recording-resumed", handleRecordResumed);
-    socket.on("meeting:recording-sync", handleRecordSync);
-    socket.on("meeting:user-joined", handleUserJoined);
-    socket.on("meeting:user-left", handleUserLeft);
-    socket.on("meeting:force-mute", handleForceMute);
-    socket.on("meeting:force-mute-all", handleForceMute);
+      socket.on("meeting:screen-share-started", handleScreenStart);
+      socket.on("meeting:screen-share-stopped", handleScreenStop);
+      socket.on("meeting:recording-started", handleRecordStart);
+      socket.on("meeting:recording-stopped", handleRecordStop);
+      socket.on("meeting:recording-paused", handleRecordPaused);
+      socket.on("meeting:recording-resumed", handleRecordResumed);
+      socket.on("meeting:recording-sync", handleRecordSync);
+      socket.on("meeting:user-joined", handleUserJoined);
+      socket.on("meeting:user-left", handleUserLeft);
+      socket.on("meeting:force-mute", handleForceMute);
+      socket.on("meeting:force-mute-all", handleForceMute);
 
-    return () => {
-      socket.off("meeting:screen-share-started", handleScreenStart);
-      socket.off("meeting:screen-share-stopped", handleScreenStop);
-      socket.off("meeting:recording-started", handleRecordStart);
-      socket.off("meeting:recording-stopped", handleRecordStop);
-      socket.off("meeting:recording-paused", handleRecordPaused);
-      socket.off("meeting:recording-resumed", handleRecordResumed);
-      socket.off("meeting:recording-sync", handleRecordSync);
-      socket.off("meeting:user-joined", handleUserJoined);
-      socket.off("meeting:user-left", handleUserLeft);
-      socket.off("meeting:force-mute", handleForceMute);
-      socket.off("meeting:force-mute-all", handleForceMute);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, id, setScreenSharingUserId, setRecordingState]);
+      return () => {
+        socket.off("meeting:screen-share-started", handleScreenStart);
+        socket.off("meeting:screen-share-stopped", handleScreenStop);
+        socket.off("meeting:recording-started", handleRecordStart);
+        socket.off("meeting:recording-stopped", handleRecordStop);
+        socket.off("meeting:recording-paused", handleRecordPaused);
+        socket.off("meeting:recording-resumed", handleRecordResumed);
+        socket.off("meeting:recording-sync", handleRecordSync);
+        socket.off("meeting:user-joined", handleUserJoined);
+        socket.off("meeting:user-left", handleUserLeft);
+        socket.off("meeting:force-mute", handleForceMute);
+        socket.off("meeting:force-mute-all", handleForceMute);
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [socket, id, setScreenSharingUserId, setRecordingState]);
 
   const executeLeaveMeeting = async () => {
     if (isLeavingMeetingRef.current || isEndingMeetingRef.current) return;

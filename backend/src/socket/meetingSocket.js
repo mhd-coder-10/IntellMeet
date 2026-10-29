@@ -142,121 +142,121 @@ const registerMeetingHandlers = (io, socket) => {
 
       socket.join(meetingId);
       const graceKey = `${meetingId}:${socket.user.id.toString()}`;
-        const wasInGrace = disconnectGraceTimers.has(graceKey);
-        if (wasInGrace) {
-          clearTimeout(disconnectGraceTimers.get(graceKey));
-          disconnectGraceTimers.delete(graceKey);
-        }
-        const wasAlreadyInRoom = roomManager.isUserInRoom(meetingId, socket.user.id);
-        socket.meetingId = meetingId;
-
-        // Cancel empty room grace timer if participant or host joins/rejoins
-        cancelEmptyRoomGraceTimer(meetingId);
-
-        const userInfo = {
-          name: socket.user.name,
-          username: socket.user.username,
-          profilePicture: socket.user.profilePicture,
-        };
-
-        roomManager.addUserToRoom(meetingId, socket.user.id, socket.id, userInfo);
-
-        const hostId = (meeting.host?._id || meeting.host)?.toString();
-        const isHost = hostId === socket.user.id.toString();
-
-        if (isHost && !meeting.startedAt) {
-          const now = new Date();
-          await meetingRepo.updateById(meetingId, {
-            startedAt: now,
-            status: "ongoing",
-          });
-          await clearMeetingCaches(meetingId, socket.user.id);
-          meeting.startedAt = now;
-          meeting.status = "ongoing";
-        }
-
-        const alreadyParticipant = (meeting.participants || []).some(
-          (p) => (p?._id || p)?.toString() === socket.user.id.toString()
-        );
-
-        if (!isHost && !alreadyParticipant) {
-          await meetingRepo.addParticipant(meetingId, socket.user.id);
-        }
-
-        // Record join session for user attendance tracking (host & participants, including rejoins)
-        try {
-          const userRepo = require("../repositories/userRepository");
-          await userRepo.recordMeetingJoin(socket.user.id, meetingId);
-        } catch (uErr) {
-          console.warn("User attendance record error:", uErr.message);
-        }
-
-        const users = roomManager.getRoomUsers(meetingId);
-
-        io.to(meetingId).emit("meeting:user-joined", {
-          userId: socket.user.id,
-          username: socket.user.username,
-          name: socket.user.name,
-          profilePicture: socket.user.profilePicture,
-          isMuted: false,
-          isVideoOn: true,
-          totalUsers: users.length,
-        });
-
-        const recordingUserId = roomManager.getRecordingUser(meetingId);
-        const recordingStartedAt = roomManager.getRecordingStartedAt(meetingId);
-        const isRecordingActive = Boolean(recordingStartedAt);
-        const pausedState = roomManager.getRecordingPausedState(meetingId);
-
-        // Server calculates elapsed seconds using server clock as single authoritative source
-        const serverElapsedSeconds =
-          isRecordingActive && recordingStartedAt
-            ? Math.max(0, Math.floor((Date.now() - recordingStartedAt) / 1000))
-            : 0;
-
-        socket.emit("meeting:joined", {
-          meetingId,
-          screenSharingUserId: roomManager.getScreenSharingUser(meetingId),
-          recordingUserId,
-          isRecording: isRecordingActive,
-          recordingStartedAt,
-          recordingElapsedSeconds: serverElapsedSeconds,
-          isRecordingPaused: pausedState.isPaused,
-          recordingPausedSeconds: pausedState.currentSeconds,
-          users: users.map((u) => ({
-            userId: u.userId,
-            name: u.name,
-            username: u.username,
-            profilePicture: u.profilePicture,
-            isMuted: u.isMuted,
-            isVideoOn: u.isVideoOn,
-          })),
-        });
-
-        // Instantly push recording status to joining participant so REC badge appears immediately without refresh
-        if (isRecordingActive) {
-          socket.emit("meeting:recording-started", {
-            meetingId,
-            userId: recordingUserId,
-            name: "Host",
-            startedAt: recordingStartedAt,
-            elapsedSeconds: serverElapsedSeconds,
-            isSilent: true,
-          });
-          if (pausedState.isPaused) {
-            socket.emit("meeting:recording-paused", {
-              userId: recordingUserId,
-              currentSeconds: pausedState.currentSeconds,
-            });
-          }
-        }
-
-        // Meeting room socket broadcast handles in-meeting participant presence
-      } catch (err) {
-        console.log("Meeting join error:", err.message);
-        socket.emit("meeting:error", { message: "Failed to join meeting" });
+      const wasInGrace = disconnectGraceTimers.has(graceKey);
+      if (wasInGrace) {
+        clearTimeout(disconnectGraceTimers.get(graceKey));
+        disconnectGraceTimers.delete(graceKey);
       }
-    });
+      const wasAlreadyInRoom = roomManager.isUserInRoom(meetingId, socket.user.id);
+      socket.meetingId = meetingId;
+
+      // Cancel empty room grace timer if participant or host joins/rejoins
+      cancelEmptyRoomGraceTimer(meetingId);
+
+      const userInfo = {
+        name: socket.user.name,
+        username: socket.user.username,
+        profilePicture: socket.user.profilePicture,
+      };
+
+      roomManager.addUserToRoom(meetingId, socket.user.id, socket.id, userInfo);
+
+      const hostId = (meeting.host?._id || meeting.host)?.toString();
+      const isHost = hostId === socket.user.id.toString();
+
+      if (isHost && !meeting.startedAt) {
+        const now = new Date();
+        await meetingRepo.updateById(meetingId, {
+          startedAt: now,
+          status: "ongoing",
+        });
+        await clearMeetingCaches(meetingId, socket.user.id);
+        meeting.startedAt = now;
+        meeting.status = "ongoing";
+      }
+
+      const alreadyParticipant = (meeting.participants || []).some(
+        (p) => (p?._id || p)?.toString() === socket.user.id.toString()
+      );
+
+      if (!isHost && !alreadyParticipant) {
+        await meetingRepo.addParticipant(meetingId, socket.user.id);
+      }
+
+      // Record join session for user attendance tracking (host & participants, including rejoins)
+      try {
+        const userRepo = require("../repositories/userRepository");
+        await userRepo.recordMeetingJoin(socket.user.id, meetingId);
+      } catch (uErr) {
+        console.warn("User attendance record error:", uErr.message);
+      }
+
+      const users = roomManager.getRoomUsers(meetingId);
+
+      io.to(meetingId).emit("meeting:user-joined", {
+        userId: socket.user.id,
+        username: socket.user.username,
+        name: socket.user.name,
+        profilePicture: socket.user.profilePicture,
+        isMuted: false,
+        isVideoOn: true,
+        totalUsers: users.length,
+      });
+
+      const recordingUserId = roomManager.getRecordingUser(meetingId);
+      const recordingStartedAt = roomManager.getRecordingStartedAt(meetingId);
+      const isRecordingActive = Boolean(recordingStartedAt);
+      const pausedState = roomManager.getRecordingPausedState(meetingId);
+
+      // Server calculates elapsed seconds using server clock as single authoritative source
+      const serverElapsedSeconds =
+        isRecordingActive && recordingStartedAt
+          ? Math.max(0, Math.floor((Date.now() - recordingStartedAt) / 1000))
+          : 0;
+
+      socket.emit("meeting:joined", {
+        meetingId,
+        screenSharingUserId: roomManager.getScreenSharingUser(meetingId),
+        recordingUserId,
+        isRecording: isRecordingActive,
+        recordingStartedAt,
+        recordingElapsedSeconds: serverElapsedSeconds,
+        isRecordingPaused: pausedState.isPaused,
+        recordingPausedSeconds: pausedState.currentSeconds,
+        users: users.map((u) => ({
+          userId: u.userId,
+          name: u.name,
+          username: u.username,
+          profilePicture: u.profilePicture,
+          isMuted: u.isMuted,
+          isVideoOn: u.isVideoOn,
+        })),
+      });
+
+      // Instantly push recording status to joining participant so REC badge appears immediately without refresh
+      if (isRecordingActive) {
+        socket.emit("meeting:recording-started", {
+          meetingId,
+          userId: recordingUserId,
+          name: "Host",
+          startedAt: recordingStartedAt,
+          elapsedSeconds: serverElapsedSeconds,
+          isSilent: true,
+        });
+        if (pausedState.isPaused) {
+          socket.emit("meeting:recording-paused", {
+            userId: recordingUserId,
+            currentSeconds: pausedState.currentSeconds,
+          });
+        }
+      }
+
+      // Meeting room socket broadcast handles in-meeting participant presence
+    } catch (err) {
+      console.log("Meeting join error:", err.message);
+      socket.emit("meeting:error", { message: "Failed to join meeting" });
+    }
+  });
 
   // Handle user leaving a meeting
   socket.on("meeting:leave", async ({ meetingId }) => {
@@ -274,91 +274,91 @@ const registerMeetingHandlers = (io, socket) => {
       try {
         const userRepo = require("../repositories/userRepository");
         await userRepo.recordMeetingLeave(socket.user.id, meetingId);
-    } catch (err) { }
+      } catch (err) { }
 
-    socket.leave(meetingId);
-    const leaveResult = roomManager.removeUserFromRoom(meetingId, socket.user.id);
-    socket.meetingId = null;
+      socket.leave(meetingId);
+      const leaveResult = roomManager.removeUserFromRoom(meetingId, socket.user.id);
+      socket.meetingId = null;
 
-    if (leaveResult?.wasScreenSharing) {
-      io.to(meetingId).emit("meeting:screen-share-stopped", {
+      if (leaveResult?.wasScreenSharing) {
+        io.to(meetingId).emit("meeting:screen-share-stopped", {
+          userId: socket.user.id,
+        });
+      }
+
+      if (leaveResult?.wasRecording) {
+        socket.to(meetingId).emit("meeting:recording-stopped", {
+          userId: socket.user.id,
+        });
+      }
+
+      io.to(meetingId).emit("meeting:user-left", {
         userId: socket.user.id,
+        name: socket.user.name,
+        username: socket.user.username,
       });
-    }
 
-    if (leaveResult?.wasRecording) {
-      socket.to(meetingId).emit("meeting:recording-stopped", {
-        userId: socket.user.id,
-      });
+      // If room is now empty (all participants left), start 5-min grace period before completing
+      if (leaveResult?.remainingCount === 0) {
+        scheduleEmptyRoomCompletion(io, meetingId, socket.user.id);
+      }
+    } catch (err) {
+      console.log("Meeting leave error:", err.message);
     }
+  });
 
-    io.to(meetingId).emit("meeting:user-left", {
-      userId: socket.user.id,
-      name: socket.user.name,
-      username: socket.user.username,
+  // Handle media state changes (mute/unmute, video on/off)
+  socket.on("meeting:media-state", ({ meetingId, isMuted, isVideoOn }) => {
+    if (!meetingId) return;
+
+    const updated = roomManager.updateUserMediaState(meetingId, socket.user.id, {
+      isMuted,
+      isVideoOn,
     });
 
-    // If room is now empty (all participants left), start 5-min grace period before completing
-    if (leaveResult?.remainingCount === 0) {
-      scheduleEmptyRoomCompletion(io, meetingId, socket.user.id);
-    }
-  } catch (err) {
-    console.log("Meeting leave error:", err.message);
-  }
-});
-
-// Handle media state changes (mute/unmute, video on/off)
-socket.on("meeting:media-state", ({ meetingId, isMuted, isVideoOn }) => {
-  if (!meetingId) return;
-
-  const updated = roomManager.updateUserMediaState(meetingId, socket.user.id, {
-    isMuted,
-    isVideoOn,
+    io.to(meetingId).emit("meeting:media-state-changed", {
+      userId: socket.user.id,
+      isMuted: typeof isMuted === "boolean" ? isMuted : (updated?.isMuted ?? false),
+      isVideoOn: typeof isVideoOn === "boolean" ? isVideoOn : (updated?.isVideoOn ?? true),
+    });
   });
 
-  io.to(meetingId).emit("meeting:media-state-changed", {
-    userId: socket.user.id,
-    isMuted: typeof isMuted === "boolean" ? isMuted : (updated?.isMuted ?? false),
-    isVideoOn: typeof isVideoOn === "boolean" ? isVideoOn : (updated?.isVideoOn ?? true),
+  // Broadcast screen share start to all participants in meeting room
+  socket.on("meeting:screen-share-started", ({ meetingId }) => {
+    if (!meetingId) return;
+    roomManager.setScreenSharingUser(meetingId, socket.user.id);
+
+    io.to(meetingId).emit("meeting:screen-share-started", {
+      userId: socket.user.id,
+      username: socket.user.username,
+      name: socket.user.name,
+    });
   });
-});
 
-// Broadcast screen share start to all participants in meeting room
-socket.on("meeting:screen-share-started", ({ meetingId }) => {
-  if (!meetingId) return;
-  roomManager.setScreenSharingUser(meetingId, socket.user.id);
+  // Broadcast screen share stop to all participants in meeting room
+  socket.on("meeting:screen-share-stopped", ({ meetingId }) => {
+    if (!meetingId) return;
+    roomManager.clearScreenSharingUser(meetingId);
 
-  io.to(meetingId).emit("meeting:screen-share-started", {
-    userId: socket.user.id,
-    username: socket.user.username,
-    name: socket.user.name,
+    io.to(meetingId).emit("meeting:screen-share-stopped", {
+      userId: socket.user.id,
+    });
   });
-});
 
-// Broadcast screen share stop to all participants in meeting room
-socket.on("meeting:screen-share-stopped", ({ meetingId }) => {
-  if (!meetingId) return;
-  roomManager.clearScreenSharingUser(meetingId);
+  // Broadcast recording start to participants
+  socket.on("meeting:recording-started", ({ meetingId, startedAt }) => {
+    if (!meetingId) return;
+    const startTime = Number(startedAt) || Date.now();
+    roomManager.setRecordingUser(meetingId, socket.user.id, startTime);
 
-  io.to(meetingId).emit("meeting:screen-share-stopped", {
-    userId: socket.user.id,
+    socket.to(meetingId).emit("meeting:recording-started", {
+      userId: socket.user.id,
+      name: socket.user.name,
+      startedAt: startTime,
+    });
   });
-});
 
-// Broadcast recording start to participants
-socket.on("meeting:recording-started", ({ meetingId, startedAt }) => {
-  if (!meetingId) return;
-  const startTime = Number(startedAt) || Date.now();
-  roomManager.setRecordingUser(meetingId, socket.user.id, startTime);
-
-  socket.to(meetingId).emit("meeting:recording-started", {
-    userId: socket.user.id,
-    name: socket.user.name,
-    startedAt: startTime,
-  });
-});
-
-// Broadcast recording stop to participants
+  // Broadcast recording stop to participants
   socket.on("meeting:recording-stopped", async ({ meetingId }) => {
     if (!meetingId) return;
 
@@ -512,108 +512,108 @@ socket.on("meeting:recording-started", ({ meetingId, startedAt }) => {
   // Handle host ending meeting via socket
   socket.on("meeting:end", async ({ meetingId }) => {
     if (!meetingId) return;
-      const mIdStr = meetingId.toString();
-      cancelEmptyRoomGraceTimer(mIdStr);
+    const mIdStr = meetingId.toString();
+    cancelEmptyRoomGraceTimer(mIdStr);
 
     try {
-        const meetingRepo = require("../repositories/meetingRepository");
-        const meeting = await meetingRepo.findById(mIdStr);
-        if(meeting && meeting.status === "ongoing") {
-      const now = new Date();
-      await meetingRepo.updateById(mIdStr, {
-        status: "completed",
-        endedAt: now,
-        startedAt: meeting.startedAt || now,
-      });
-      const userRepo = require("../repositories/userRepository");
-      await userRepo.closeMeetingSessions(mIdStr, now);
-      await clearMeetingCaches(mIdStr, socket.user.id);
-    }
-  } catch (err) {
-    console.error("[Meeting End] DB update error:", err.message);
-  }
-
-  io.to(mIdStr).emit("meeting:ended", {
-    meetingId: mIdStr,
-    message: "Meeting has been ended by the host",
-  });
-  io.emit("meeting:ended", {
-    meetingId: mIdStr,
-    message: "Meeting has been ended by the host",
-  });
-  io.to(mIdStr).emit("meeting:updated", {
-    meetingId: mIdStr,
-    status: "completed",
-  });
-  io.emit("meeting:updated", {
-    meetingId: mIdStr,
-    status: "completed",
-  });
-
-  roomManager.clearRoom(mIdStr);
-  setTimeout(() => {
-    io.in(mIdStr).socketsLeave(mIdStr);
-  }, 1000);
-});
-
-// Meeting disconnect handler to clean up DB and notify host
-// Grace period is 30s (increased from 15s) so long meetings survive brief network hiccups.
-// Before emitting user-left we also check roomManager to confirm the user is truly gone
-// (i.e. did NOT reconnect via a new socket and re-emit meeting:join during the grace window).
-socket.on("disconnect", async () => {
-  const meetingId = socket.meetingId;
-  const userId = socket.user?.id ? socket.user.id.toString() : null;
-
-  if (meetingId && userId) {
-    const graceKey = `${meetingId}:${userId}`;
-    if (disconnectGraceTimers.has(graceKey)) {
-      clearTimeout(disconnectGraceTimers.get(graceKey));
-      disconnectGraceTimers.delete(graceKey);
-    }
-
-    const timer = setTimeout(async () => {
-      disconnectGraceTimers.delete(graceKey);
-
-      // If the user reconnected during the grace window, meeting:join would have
-      // called addUserToRoom again — so they are still in the room. Skip the leave.
-      const stillInRoom = roomManager.isUserInRoom(meetingId, userId);
-      if (stillInRoom) {
-        console.log(`[Meeting Disconnect] User ${userId} reconnected to room ${meetingId} during grace window — skipping leave.`);
-        return;
-      }
-
-      try {
+      const meetingRepo = require("../repositories/meetingRepository");
+      const meeting = await meetingRepo.findById(mIdStr);
+      if (meeting && meeting.status === "ongoing") {
+        const now = new Date();
+        await meetingRepo.updateById(mIdStr, {
+          status: "completed",
+          endedAt: now,
+          startedAt: meeting.startedAt || now,
+        });
         const userRepo = require("../repositories/userRepository");
-        await userRepo.recordMeetingLeave(userId, meetingId);
-    } catch (err) { }
-
-    const disconnectResult = roomManager.removeUserFromRoom(meetingId, userId);
-
-    if (disconnectResult?.wasScreenSharing) {
-      io.to(meetingId).emit("meeting:screen-share-stopped", {
-        userId,
-      });
+        await userRepo.closeMeetingSessions(mIdStr, now);
+        await clearMeetingCaches(mIdStr, socket.user.id);
+      }
+    } catch (err) {
+      console.error("[Meeting End] DB update error:", err.message);
     }
 
-    if (disconnectResult?.wasRecording) {
-      socket.to(meetingId).emit("meeting:recording-stopped", {
-        userId,
-      });
-    }
-
-    io.to(meetingId).emit("meeting:user-left", {
-      userId,
-      name: socket.user.name,
-      username: socket.user.username,
+    io.to(mIdStr).emit("meeting:ended", {
+      meetingId: mIdStr,
+      message: "Meeting has been ended by the host",
+    });
+    io.emit("meeting:ended", {
+      meetingId: mIdStr,
+      message: "Meeting has been ended by the host",
+    });
+    io.to(mIdStr).emit("meeting:updated", {
+      meetingId: mIdStr,
+      status: "completed",
+    });
+    io.emit("meeting:updated", {
+      meetingId: mIdStr,
+      status: "completed",
     });
 
-    // If room is now empty (all participants left), start 5-min grace period before completing
-    if (disconnectResult?.remainingCount === 0) {
-      scheduleEmptyRoomCompletion(io, meetingId, userId);
-    }
+    roomManager.clearRoom(mIdStr);
+    setTimeout(() => {
+      io.in(mIdStr).socketsLeave(mIdStr);
+    }, 1000);
+  });
+
+  // Meeting disconnect handler to clean up DB and notify host
+  // Grace period is 30s (increased from 15s) so long meetings survive brief network hiccups.
+  // Before emitting user-left we also check roomManager to confirm the user is truly gone
+  // (i.e. did NOT reconnect via a new socket and re-emit meeting:join during the grace window).
+  socket.on("disconnect", async () => {
+    const meetingId = socket.meetingId;
+    const userId = socket.user?.id ? socket.user.id.toString() : null;
+
+    if (meetingId && userId) {
+      const graceKey = `${meetingId}:${userId}`;
+      if (disconnectGraceTimers.has(graceKey)) {
+        clearTimeout(disconnectGraceTimers.get(graceKey));
+        disconnectGraceTimers.delete(graceKey);
+      }
+
+      const timer = setTimeout(async () => {
+        disconnectGraceTimers.delete(graceKey);
+
+        // If the user reconnected during the grace window, meeting:join would have
+        // called addUserToRoom again — so they are still in the room. Skip the leave.
+        const stillInRoom = roomManager.isUserInRoom(meetingId, userId);
+        if (stillInRoom) {
+          console.log(`[Meeting Disconnect] User ${userId} reconnected to room ${meetingId} during grace window — skipping leave.`);
+          return;
+        }
+
+        try {
+          const userRepo = require("../repositories/userRepository");
+          await userRepo.recordMeetingLeave(userId, meetingId);
+        } catch (err) { }
+
+        const disconnectResult = roomManager.removeUserFromRoom(meetingId, userId);
+
+        if (disconnectResult?.wasScreenSharing) {
+          io.to(meetingId).emit("meeting:screen-share-stopped", {
+            userId,
+          });
+        }
+
+        if (disconnectResult?.wasRecording) {
+          socket.to(meetingId).emit("meeting:recording-stopped", {
+            userId,
+          });
+        }
+
+        io.to(meetingId).emit("meeting:user-left", {
+          userId,
+          name: socket.user.name,
+          username: socket.user.username,
+        });
+
+        // If room is now empty (all participants left), start 5-min grace period before completing
+        if (disconnectResult?.remainingCount === 0) {
+          scheduleEmptyRoomCompletion(io, meetingId, userId);
+        }
       }, 30000);
 
-disconnectGraceTimers.set(graceKey, timer);
+      disconnectGraceTimers.set(graceKey, timer);
     }
   });
 };
