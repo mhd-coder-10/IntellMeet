@@ -272,7 +272,7 @@ const registerMeetingHandlers = (io, socket) => {
       try {
         const userRepo = require("../repositories/userRepository");
         await userRepo.recordMeetingLeave(socket.user.id, meetingId);
-      } catch (err) {}
+      } catch (err) { }
 
       socket.leave(meetingId);
       const leaveResult = roomManager.removeUserFromRoom(meetingId, socket.user.id);
@@ -360,7 +360,7 @@ const registerMeetingHandlers = (io, socket) => {
   socket.on("meeting:recording-stopped", ({ meetingId }) => {
     if (!meetingId) return;
     roomManager.clearRecordingUser(meetingId);
-    
+
     socket.to(meetingId).emit("meeting:recording-stopped", {
       userId: socket.user.id,
     });
@@ -536,7 +536,7 @@ const registerMeetingHandlers = (io, socket) => {
         try {
           const userRepo = require("../repositories/userRepository");
           await userRepo.recordMeetingLeave(userId, meetingId);
-        } catch (err) {}
+        } catch (err) { }
 
         const disconnectResult = roomManager.removeUserFromRoom(meetingId, userId);
 
@@ -562,10 +562,10 @@ const registerMeetingHandlers = (io, socket) => {
         if (disconnectResult?.remainingCount === 0) {
           scheduleEmptyRoomCompletion(io, meetingId, userId);
         }
-      }, 30000);
+    }, 30000);
 
-      disconnectGraceTimers.set(graceKey, timer);
-    }
+  disconnectGraceTimers.set(graceKey, timer);
+}
   });
 };
 

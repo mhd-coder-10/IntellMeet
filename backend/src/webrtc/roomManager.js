@@ -33,7 +33,7 @@ const updateMetrics = () => {
       totalParticipants += r.users?.size || 0;
     });
     setActiveParticipants(totalParticipants);
-  } catch {}
+  } catch { }
 };
 
 // Add a user to a room
