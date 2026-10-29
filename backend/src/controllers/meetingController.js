@@ -152,25 +152,6 @@ const joinMeeting = async (req, res) => {
             req.user.id
         )
 
-        const io = req.app.get("io")
-        if (io && data.userJoined) {
-            const roomManager = require("../webrtc/roomManager")
-            const isAlreadyInRoom = roomManager.isUserInRoom(req.params.id, req.user.id);
-            // Only broadcast user-joined if user is NOT already in room to prevent duplicate toasts on tab switch or reconnect
-            if (!isAlreadyInRoom) {
-                const users = roomManager.getRoomUsers(req.params.id)
-
-                io.to(req.params.id).emit("meeting:user-joined", {
-                    userId: data.userJoined.userId,
-                    username: data.userJoined.username,
-                    name: data.userJoined.name,
-                    profilePicture: data.userJoined.profilePicture,
-                    totalUsers: users.length,
-                    source: "http",
-                })
-            }
-        }
-
         res.status(200).json({
             success: true,
             message: "Joined meeting successfully",
