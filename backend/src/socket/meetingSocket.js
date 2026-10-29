@@ -193,18 +193,15 @@ const registerMeetingHandlers = (io, socket) => {
 
         const users = roomManager.getRoomUsers(meetingId);
 
-        // Only emit meeting:user-joined if this is genuinely a fresh join, NOT a reconnect or tab-switch
-        if (!wasAlreadyInRoom && !wasInGrace) {
-          io.to(meetingId).emit("meeting:user-joined", {
-            userId: socket.user.id,
-            username: socket.user.username,
-            name: socket.user.name,
-            profilePicture: socket.user.profilePicture,
-            isMuted: false,
-            isVideoOn: true,
-            totalUsers: users.length,
-          });
-        }
+        io.to(meetingId).emit("meeting:user-joined", {
+          userId: socket.user.id,
+          username: socket.user.username,
+          name: socket.user.name,
+          profilePicture: socket.user.profilePicture,
+          isMuted: false,
+          isVideoOn: true,
+          totalUsers: users.length,
+        });
 
         const recordingUserId = roomManager.getRecordingUser(meetingId);
         const recordingStartedAt = roomManager.getRecordingStartedAt(meetingId);

@@ -82,9 +82,8 @@ export default function MeetingRoom() {
 
   // Track unread messages when chat sidebar is closed
   const prevMessagesCountRef = useRef(messages.length);
-  // Deduplicate rapid join/leave notifications for the same user
-  const lastJoinToastRef = useRef<Map<string, number>>(new Map());
-  const lastLeftToastRef = useRef<Map<string, number>>(new Map());
+  // Tracks actively connected member IDs to announce new joiners and avoid duplicate toasts on tab switch
+  const activeMembersRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (isChatOpen) {
       setUnreadCount(0);
@@ -222,7 +221,15 @@ export default function MeetingRoom() {
       recordingElapsedSeconds?: number;
       isRecordingPaused?: boolean;
       recordingPausedSeconds?: number;
+      users?: Array<{ userId: string }>;
     }) => {
+      if (Array.isArray(data.users)) {
+        data.users.forEach((u) => {
+          if (u?.userId) {
+            activeMembersRef.current.add(String(u.userId));
+          }
+        });
+      }
       if (data.screenSharingUserId) {
         setScreenSharingUserId(data.screenSharingUserId);
       }
@@ -550,30 +557,21 @@ export default function MeetingRoom() {
       }
     };
 
-      const handleUserJoined = (data: {
-        userId: string;
-        name?: string;
-        username?: string;
-      }) => {
-        const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
-        if (currentUserId && String(data.userId) === String(currentUserId)) return;
+    const handleUserJoined = (data: {
+      userId: string;
+      name?: string;
+      username?: string;
+    }) => {
+      const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
+      if (currentUserId && String(data.userId) === String(currentUserId)) return;
 
-        const userIdStr = String(data.userId);
+      const userIdStr = String(data.userId);
 
-        // Check if peer is ALREADY in peers list
-        const alreadyPresent = useMeetingStore
-          .getState()
-          .peers.some((p) => String(p.userId) === userIdStr);
-        if (alreadyPresent) {
-          // Peer is already in meeting (e.g. tab switch or reconnect) — do not toast!
-          return;
-        }
-
-      const now = Date.now();
-      const lastNotified = lastJoinToastRef.current.get(userIdStr) || 0;
-      if (now - lastNotified < 5000) return; // Ignore duplicate join events within 5 seconds
-      lastJoinToastRef.current.set(userIdStr, now);
-      lastLeftToastRef.current.delete(userIdStr);
+      // If user was already tracked as active in this call, ignore duplicate toast on tab-switch/reconnect
+      if (activeMembersRef.current.has(userIdStr)) {
+        return;
+      }
+      activeMembersRef.current.add(userIdStr);
 
       const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
       const isHostJoining = hostId && userIdStr === String(hostId);
@@ -601,11 +599,9 @@ export default function MeetingRoom() {
       if (currentUserId && String(data.userId) === String(currentUserId)) return;
 
       const userIdStr = String(data.userId);
-      const now = Date.now();
-      const lastNotified = lastLeftToastRef.current.get(userIdStr) || 0;
-      if (now - lastNotified < 3000) return; // Ignore duplicate left events within 3 seconds
-      lastLeftToastRef.current.set(userIdStr, now);
-      lastJoinToastRef.current.delete(userIdStr);
+
+      // Remove from active tracked members so if they rejoin later, they get a fresh toast
+      activeMembersRef.current.delete(userIdStr);
 
       const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
       const isHostLeaving = hostId && userIdStr === String(hostId);
