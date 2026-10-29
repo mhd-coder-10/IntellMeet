@@ -390,6 +390,18 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
     [setLocalStream, socket, startLocalStream]
   );
 
+  // Stable refs for callbacks used in socket listeners so the effect is NOT
+  // torn down and re-registered every time these functions change identity.
+  // This prevents the brief "listener gap" that caused ghost leave/join events.
+  const startLocalStreamRef = useRef(startLocalStream);
+  startLocalStreamRef.current = startLocalStream;
+
+  const callPeerRef = useRef(callPeer);
+  callPeerRef.current = callPeer;
+
+  const drainPendingCandidatesRef = useRef(drainPendingCandidates);
+  drainPendingCandidatesRef.current = drainPendingCandidates;
+
   // Socket event listeners: stable lifecycle attached once per (socket, meetingId)
   useEffect(() => {
     if (!socket || !meetingId) return;
@@ -446,7 +458,7 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       let stream = localStreamRef.current;
       if (!stream) {
         try {
-          stream = await startLocalStream();
+          stream = await startLocalStreamRef.current();
         } catch {
           stream = createFallbackStream();
         }
@@ -457,7 +469,7 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
         const uId = String(u.userId);
         if (uId === myId) continue;
 
-        await callPeer(
+        await callPeerRef.current(
           {
             userId: uId,
             name: u.name,
@@ -536,7 +548,7 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       let stream = localStreamRef.current;
       if (!stream) {
         try {
-          stream = await startLocalStream();
+          stream = await startLocalStreamRef.current();
         } catch {
           stream = createFallbackStream();
         }
@@ -601,7 +613,7 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
 
         // 2. Drain any early ICE candidates that arrived before remoteDescription was set
-        await drainPendingCandidates(peerId, pc);
+        await drainPendingCandidatesRef.current(peerId, pc);
 
         // 3. Attach local tracks to the negotiated transceivers
         const audioTrack = stream.getAudioTracks()[0];
@@ -645,7 +657,7 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       if (pc) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-          await drainPendingCandidates(peerId, pc);
+          await drainPendingCandidatesRef.current(peerId, pc);
           syncPeerStream(pc, fromUserId, updatePeer);
         } catch (err) {
           console.error("[WebRTC] Error setting remote answer for peer:", peerId, err);
@@ -730,7 +742,8 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
       socket.off("meeting:screen-share-started", handleScreenShareStarted);
       socket.off("meeting:screen-share-stopped", handleScreenShareStopped);
     };
-  }, [socket, meetingId, addPeer, removePeer, updatePeer, startLocalStream, callPeer, drainPendingCandidates]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, meetingId, addPeer, removePeer, updatePeer]);
 
   // Stop local camera and microphone tracks
   const stopLocalStream = useCallback(() => {

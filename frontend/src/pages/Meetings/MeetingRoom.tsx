@@ -380,13 +380,38 @@ export default function MeetingRoom() {
     queryClient,
   ]);
 
+  // Stable refs for values used inside socket event handlers
+  // These refs let us read current values without adding them to the dependency array,
+  // which would cause the effect to re-run (and briefly drop events) on every re-render.
+  const isHostRef = useRef(isHost);
+  isHostRef.current = isHost;
+
+  const isRecorderActiveRef = useRef(isRecorderActive);
+  isRecorderActiveRef.current = isRecorderActive;
+
+  const stopRecordingRef = useRef(stopRecording);
+  stopRecordingRef.current = stopRecording;
+
+  const clearRecordedResultRef = useRef(clearRecordedResult);
+  clearRecordedResultRef.current = clearRecordedResult;
+
+  const userRef = useRef(user);
+  userRef.current = user;
+
+  const meetingHostRef = useRef(meeting?.host);
+  meetingHostRef.current = meeting?.host;
+
   // Listen for screen share and recording events across the room
+  // Dependency array is intentionally minimal (only socket + stable setters + id) so the
+  // effect is NOT torn down and re-registered on every meeting query refetch. All volatile
+  // values (isHost, user, meeting.host, isRecorderActive…) are read via stable refs above.
   useEffect(() => {
     if (!socket) return;
 
     const handleScreenStart = ({ userId, name }: { userId: string; name?: string }) => {
       setScreenSharingUserId(userId);
-      if (!user?.id || String(userId) !== String(user.id)) {
+      const currentUserId = userRef.current?.id;
+      if (!currentUserId || String(userId) !== String(currentUserId)) {
         toast.info(`${name || "Someone"} started screen sharing`);
       }
     };
@@ -419,15 +444,15 @@ export default function MeetingRoom() {
     };
 
     const handleRecordSync = ({ currentSeconds }: { currentSeconds?: number }) => {
-      if (typeof currentSeconds === "number" && !isRecorderActive()) {
+      if (typeof currentSeconds === "number" && !isRecorderActiveRef.current()) {
         setRemoteRecordingTime(currentSeconds);
       }
     };
 
     const handleRecordStop = async (data?: { userId?: string }) => {
       // If current user is host and actively recording, ignore remote stop signals from other departing users
-      const currentUserId = user?.id || (user as any)?._id;
-      if (isHost && isRecorderActive()) {
+      const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
+      if (isHostRef.current && isRecorderActiveRef.current()) {
         if (data?.userId && String(data.userId) !== String(currentUserId)) {
           console.log("Ignoring remote recording-stopped event from peer:", data.userId);
           return;
@@ -439,13 +464,13 @@ export default function MeetingRoom() {
       setRemoteRecordingTime(0);
       toast.info("Recording stopped");
       playRecordingStopChime();
-      if (isRecorderActive()) {
+      if (isRecorderActiveRef.current()) {
         try {
-          const result = await stopRecording(true);
+          const result = await stopRecordingRef.current(true);
           if (result) {
             pendingRecordingsRef.current.push(result);
           }
-          clearRecordedResult();
+          clearRecordedResultRef.current();
         } catch (err) {
           console.error("Delegated recorder stop error:", err);
         }
@@ -467,7 +492,7 @@ export default function MeetingRoom() {
 
     // Handle force mute by meeting host
     const handleForceMute = (data?: { mutedBy?: string; isMuteAll?: boolean }) => {
-      if (isHost) return;
+      if (isHostRef.current) return;
 
       const { localStream, setIsMuted, isVideoOn } = useMeetingStore.getState();
 
@@ -498,7 +523,7 @@ export default function MeetingRoom() {
       name?: string;
       username?: string;
     }) => {
-      const currentUserId = user?.id || (user as any)?._id;
+      const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
       if (currentUserId && String(data.userId) === String(currentUserId)) return;
 
       const userIdStr = String(data.userId);
@@ -508,7 +533,7 @@ export default function MeetingRoom() {
       lastJoinToastRef.current.set(userIdStr, now);
       lastLeftToastRef.current.delete(userIdStr);
 
-      const hostId = (meeting?.host?._id || meeting?.host)?.toString();
+      const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
       const isHostJoining = hostId && userIdStr === String(hostId);
       const peer = useMeetingStore
         .getState()
@@ -530,7 +555,7 @@ export default function MeetingRoom() {
       name?: string;
       username?: string;
     }) => {
-      const currentUserId = user?.id || (user as any)?._id;
+      const currentUserId = userRef.current?.id || (userRef.current as any)?._id;
       if (currentUserId && String(data.userId) === String(currentUserId)) return;
 
       const userIdStr = String(data.userId);
@@ -540,7 +565,7 @@ export default function MeetingRoom() {
       lastLeftToastRef.current.set(userIdStr, now);
       lastJoinToastRef.current.delete(userIdStr);
 
-      const hostId = (meeting?.host?._id || meeting?.host)?.toString();
+      const hostId = (meetingHostRef.current?._id || meetingHostRef.current)?.toString();
       const isHostLeaving = hostId && userIdStr === String(hostId);
       const peer = useMeetingStore
         .getState()
@@ -582,15 +607,8 @@ export default function MeetingRoom() {
       socket.off("meeting:force-mute", handleForceMute);
       socket.off("meeting:force-mute-all", handleForceMute);
     };
-  }, [
-    socket,
-    setScreenSharingUserId,
-    setRecordingState,
-    isHost,
-    id,
-    user?.id,
-    meeting?.host,
-  ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, id, setScreenSharingUserId, setRecordingState]);
 
   const executeLeaveMeeting = async () => {
     if (isLeavingMeetingRef.current || isEndingMeetingRef.current) return;

@@ -508,7 +508,9 @@ const registerMeetingHandlers = (io, socket) => {
   });
 
   // Meeting disconnect handler to clean up DB and notify host
-  // Meeting disconnect handler with 15-second grace period for mobile / Wi-Fi network blips
+  // Grace period is 30s (increased from 15s) so long meetings survive brief network hiccups.
+  // Before emitting user-left we also check roomManager to confirm the user is truly gone
+  // (i.e. did NOT reconnect via a new socket and re-emit meeting:join during the grace window).
   socket.on("disconnect", async () => {
     const meetingId = socket.meetingId;
     const userId = socket.user?.id ? socket.user.id.toString() : null;
@@ -522,6 +524,14 @@ const registerMeetingHandlers = (io, socket) => {
 
       const timer = setTimeout(async () => {
         disconnectGraceTimers.delete(graceKey);
+
+        // If the user reconnected during the grace window, meeting:join would have
+        // called addUserToRoom again — so they are still in the room. Skip the leave.
+        const stillInRoom = roomManager.isUserInRoom(meetingId, userId);
+        if (stillInRoom) {
+          console.log(`[Meeting Disconnect] User ${userId} reconnected to room ${meetingId} during grace window — skipping leave.`);
+          return;
+        }
 
         try {
           const userRepo = require("../repositories/userRepository");
@@ -552,7 +562,7 @@ const registerMeetingHandlers = (io, socket) => {
         if (disconnectResult?.remainingCount === 0) {
           scheduleEmptyRoomCompletion(io, meetingId, userId);
         }
-      }, 15000);
+      }, 30000);
 
       disconnectGraceTimers.set(graceKey, timer);
     }

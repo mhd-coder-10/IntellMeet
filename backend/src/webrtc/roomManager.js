@@ -142,15 +142,16 @@ const getScreenSharingUser = (meetingId) => {
   return room?.screenSharingUserId ? room.screenSharingUserId.toString() : null;
 };
 
-// Set who is recording and recording started timestamp
+// Set who is recording and recording started timestamp.
+// Always overwrites startedAt so a stop→restart cycle gets a fresh timestamp
+// instead of reusing the stale one from the previous recording session.
 const setRecordingUser = (meetingId, userId, startedAt = Date.now()) => {
   const room = activeRooms.get(meetingId);
   if (!room) return null;
   room.recordingUserId = userId ? userId.toString() : null;
   if (userId) {
-    if (!room.recordingStartedAt) {
-      room.recordingStartedAt = Number(startedAt) || Date.now();
-    }
+    // Always set the provided startedAt (do NOT skip on restart)
+    room.recordingStartedAt = Number(startedAt) || Date.now();
   } else {
     room.recordingStartedAt = null;
   }
