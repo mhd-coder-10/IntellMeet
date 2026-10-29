@@ -97,8 +97,6 @@ const syncPeerStream = (
     }
   });
 
-  const hasLiveVideo = activeTracks.some((t) => t.kind === "video" && t.readyState === "live" && !t.muted);
-
   // Always create a fresh MediaStream instance with current active tracks
   // This guarantees React detects a reference change and re-renders VideoTile immediately!
   const freshStream = new MediaStream(activeTracks);
