@@ -45,6 +45,7 @@ const sendSignupOtp = async ({ email, name }) => {
 
   return {
     message: "Verification code sent to your email",
+    otp,
   }
 }
 

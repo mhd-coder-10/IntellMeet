@@ -1095,30 +1095,33 @@ return (
 
     {/* CREATE PROJECT BOARD MODAL */}
     {isCreateBoardOpen && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-        <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-white p-6 sm:p-8 shadow-xl border border-slate-200 space-y-6">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-xs overflow-y-auto">
+        <div className="relative w-full max-w-lg max-h-[90vh] my-auto flex flex-col rounded-2xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          {/* Modal Header */}
+          <div className="flex items-center justify-between p-5 sm:p-6 pb-4 border-b border-slate-100 shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
                 <FolderKanban className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
                   Create Project Board
                 </h3>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 mt-0.5">
                   Set up a Kanban board for sprints, feature tracking, or milestones.
                 </p>
               </div>
             </div>
             <button
+              type="button"
               onClick={() => setIsCreateBoardOpen(false)}
-              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100"
+              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
+          {/* Modal Body / Scrollable Form */}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -1133,7 +1136,7 @@ return (
                 memberIds: createBoardMembers,
               });
             }}
-            className="space-y-4"
+            className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4"
           >
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -1143,7 +1146,7 @@ return (
                 value={boardName}
                 onChange={(e) => setBoardName(e.target.value)}
                 placeholder="e.g. Sprint 1, Mobile App MVP, Marketing Launch"
-                className="h-11 rounded-xl text-sm"
+                className="h-10 sm:h-11 rounded-xl text-sm"
                 required
               />
             </div>
@@ -1156,7 +1159,7 @@ return (
                 value={boardDescription}
                 onChange={(e) => setBoardDescription(e.target.value)}
                 placeholder="What is the goal or focus of this board?"
-                rows={3}
+                rows={2}
                 className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
               />
             </div>
@@ -1165,7 +1168,7 @@ return (
               <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                 Board Theme Accent
               </label>
-              <div className="flex flex-wrap gap-2.5">
+              <div className="flex flex-wrap gap-2">
                 {Object.keys(boardColorThemes).map((c) => (
                   <button
                     key={c}
@@ -1183,14 +1186,21 @@ return (
             </div>
 
             {/* Assign Members to this Project */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
-                Assign Workspace Members (Optional)
-              </label>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Assign Workspace Members (Optional)
+                </label>
+                {activeMembers.length > 0 && (
+                  <span className="text-[11px] text-slate-400 font-medium">
+                    {createBoardMembers.length} selected
+                  </span>
+                )}
+              </div>
               <p className="text-[11px] text-slate-400">
                 Select which workspace members should be part of this project board.
               </p>
-              <div className="max-h-36 overflow-y-auto space-y-1 rounded-xl border border-slate-200 p-2 bg-slate-50/50">
+              <div className="max-h-32 overflow-y-auto space-y-1 rounded-xl border border-slate-200 p-2 bg-slate-50/50">
                 {activeMembers.length > 0 ? (
                   activeMembers.map((m) => {
                     const uid = m.user?._id || (m.user as any);
@@ -1198,7 +1208,7 @@ return (
                     return (
                       <label
                         key={uid}
-                        className="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-white cursor-pointer transition text-xs text-slate-700"
+                        className="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-white cursor-pointer transition text-xs text-slate-700 select-none"
                       >
                         <input
                           type="checkbox"
@@ -1223,19 +1233,20 @@ return (
               </div>
             </div>
 
-            <div className="p-3.5 bg-blue-50/70 border border-blue-200/60 rounded-xl text-xs text-blue-800 space-y-1">
+            <div className="p-3 bg-blue-50/70 border border-blue-200/60 rounded-xl text-xs text-blue-800 space-y-0.5">
               <span className="font-semibold block">Automatic Kanban Structure:</span>
-              <span className="text-[11px] text-blue-700">
+              <span className="text-[11px] text-blue-700 leading-relaxed block">
                 This board automatically initializes with 4 columns: <strong>To Do</strong>, <strong>In Progress</strong>, <strong>In Review</strong>, and <strong>Done</strong>.
               </span>
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-3">
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setIsCreateBoardOpen(false)}
-                className="rounded-xl border-slate-200 text-slate-600 text-xs h-10"
+                className="rounded-xl border-slate-200 text-slate-600 text-xs h-10 px-4"
               >
                 Cancel
               </Button>
