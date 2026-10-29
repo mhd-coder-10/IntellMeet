@@ -27,6 +27,58 @@ router.get("/projects/:id/members", protect, projectController.getProjectMembers
 
 /**
  * @swagger
+ * /projects/{id}/members:
+ *   post:
+ *     summary: Add a member to a project board
+ *     tags: [Projects]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userId
+ *             properties:
+ *               userId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Member added to project successfully
+ */
+router.post("/projects/:id/members", protect, projectController.addProjectMember);
+
+/**
+ * @swagger
+ * /projects/{id}/members/{userId}:
+ *   delete:
+ *     summary: Remove a member from a project board
+ *     tags: [Projects]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Member removed from project successfully
+ */
+router.delete("/projects/:id/members/:userId", protect, projectController.removeProjectMember);
+
+/**
+ * @swagger
  * /projects/{id}:
  *   get:
  *     summary: Get project board details and columns by ID

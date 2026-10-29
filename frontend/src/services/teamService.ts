@@ -1,7 +1,7 @@
 // Team Workspace and Project Board API Service
 
 import api from "./api";
-import type { Team, ProjectBoard } from "@/types/team";
+import type { Team, ProjectBoard, TeamMemberUser } from "@/types/team";
 
 // Get all workspaces for current user
 export const getUserTeams = async (): Promise<Team[]> => {
@@ -112,7 +112,7 @@ export const cancelJoinRequest = async (teamId: string): Promise<{ message: stri
 // Create a new project board in a team
 export const createProject = async (
   teamId: string,
-  data: { name: string; description?: string; color?: string }
+  data: { name: string; description?: string; color?: string; memberIds?: string[] }
 ): Promise<ProjectBoard> => {
   const res = await api.post<{ success: boolean; data: ProjectBoard }>(
     `/teams/${teamId}/projects`,
@@ -140,7 +140,13 @@ export const getProjectById = async (projectId: string): Promise<ProjectBoard> =
 // Update project board
 export const updateProject = async (
   projectId: string,
-  data: { name?: string; description?: string; color?: string; status?: string }
+  data: {
+    name?: string;
+    description?: string;
+    color?: string;
+    status?: string;
+    memberIds?: string[];
+  }
 ): Promise<ProjectBoard> => {
   const res = await api.put<{ success: boolean; data: ProjectBoard }>(
     `/projects/${projectId}`,
@@ -152,4 +158,37 @@ export const updateProject = async (
 // Delete project board
 export const deleteProject = async (projectId: string): Promise<void> => {
   await api.delete(`/projects/${projectId}`);
+};
+
+// Add member to project board
+export const addProjectMember = async (
+  projectId: string,
+  userId: string
+): Promise<ProjectBoard> => {
+  const res = await api.post<{ success: boolean; data: ProjectBoard }>(
+    `/projects/${projectId}/members`,
+    { userId }
+  );
+  return res.data.data;
+};
+
+// Remove member from project board
+export const removeProjectMember = async (
+  projectId: string,
+  userId: string
+): Promise<ProjectBoard> => {
+  const res = await api.delete<{ success: boolean; data: ProjectBoard }>(
+    `/projects/${projectId}/members/${userId}`
+  );
+  return res.data.data;
+};
+
+// Get members eligible or assigned to a project board
+export const getProjectMembers = async (
+  projectId: string
+): Promise<TeamMemberUser[]> => {
+  const res = await api.get<{ success: boolean; data: TeamMemberUser[] }>(
+    `/projects/${projectId}/members`
+  );
+  return res.data.data;
 };

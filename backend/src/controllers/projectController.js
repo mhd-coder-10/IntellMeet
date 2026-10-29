@@ -1,5 +1,5 @@
 // Project Board Controller
-// Handles endpoints for project boards and Kanban configuration
+// Handles endpoints for project boards, Kanban configuration, and project member management
 
 const projectService = require("../services/projectService");
 
@@ -110,11 +110,63 @@ const getProjectMembers = async (req, res) => {
   }
 };
 
-module.exports = {
-  createProject,
-  getProjectsByTeam,
-  getProjectById,
-  getProjectMembers,
-  updateProject,
-  deleteProject,
-};
+const addProjectMember = async (req, res) => {
+  try {
+    const { userId: targetUserId } = req.body;
+    if (!targetUserId) {
+      return res.status(400).json({ success: false, message: "userId is required" });
+    }
+    const project = await projectService.addProjectMember(req.params.id, req.user.id, targetUserId);
+    const io = req.app.get("io");
+      if (io) {
+        if (project.team) {
+          io.to(`team:${project.team}`).emit("team:updated", { _id: project.team });
+        }
+        io.to(`project:${project._id}`).emit("project:updated", project);
+      }
+      res.status(200).json({
+        success: true,
+        message: "Member added to project successfully",
+        data: project,
+      });
+    } catch (error) {
+      res.status(error.statusCode || 400).json({
+        success: false,
+        message: error.message || "Failed to add project member",
+      });
+    }
+  };
+
+  const removeProjectMember = async (req, res) => {
+    try {
+      const project = await projectService.removeProjectMember(req.params.id, req.user.id, req.params.userId);
+      const io = req.app.get("io");
+        if (io) {
+          if (project.team) {
+            io.to(`team:${project.team}`).emit("team:updated", { _id: project.team });
+          }
+          io.to(`project:${project._id}`).emit("project:updated", project);
+        }
+        res.status(200).json({
+          success: true,
+          message: "Member removed from project successfully",
+          data: project,
+        });
+      } catch (error) {
+        res.status(error.statusCode || 400).json({
+          success: false,
+          message: error.message || "Failed to remove project member",
+        });
+      }
+    };
+
+    module.exports = {
+      createProject,
+      getProjectsByTeam,
+      getProjectById,
+      getProjectMembers,
+      addProjectMember,
+      removeProjectMember,
+      updateProject,
+      deleteProject,
+    };

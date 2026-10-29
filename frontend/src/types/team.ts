@@ -22,6 +22,12 @@ export interface KanbanColumn {
   color?: string;
 }
 
+export interface ProjectMember {
+  user: TeamMemberUser;
+  addedAt?: string;
+  _id?: string;
+}
+
 export interface ProjectBoard {
   _id: string;
   name: string;
@@ -31,6 +37,7 @@ export interface ProjectBoard {
   status: "active" | "completed" | "archived";
   color: string;
   columns: KanbanColumn[];
+  members?: ProjectMember[];
   totalTasks?: number;
   doneTasks?: number;
   createdAt: string;

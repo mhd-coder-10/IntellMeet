@@ -67,6 +67,19 @@ const projectSchema = new mongoose.Schema(
       type: String,
       default: "blue",
     },
+    members: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        addedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     columns: {
       type: [columnSchema],
       default: defaultColumns,
