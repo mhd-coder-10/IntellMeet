@@ -103,10 +103,7 @@ const syncPeerStream = (
   // This guarantees React detects a reference change and re-renders VideoTile immediately!
   const freshStream = new MediaStream(activeTracks);
 
-  updatePeer(userId, {
-    stream: freshStream,
-    ...(hasLiveVideo ? { isVideoOn: true } : {}),
-  });
+  updatePeer(userId, { stream: freshStream });
 };
 
 export function useWebRTC(socket: Socket | null, meetingId: string | null) {
@@ -324,6 +321,16 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
   // Toggle camera: replaces video track with real camera or null
   const toggleVideo = useCallback(
     async (enabled: boolean) => {
+      // INSTANT: Emit socket state change immediately so remote peers see avatar/video switch
+      // right away — before any async camera operations that could take 200-800ms
+      if (socket && meetingIdRef.current) {
+        socket.emit("meeting:media-state", {
+          meetingId: meetingIdRef.current,
+          isMuted: isMutedRef.current,
+          isVideoOn: enabled,
+        });
+      }
+
       let currentStream = useMeetingStore.getState().localStream;
       if (!currentStream) {
         try {
@@ -350,9 +357,21 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
           freshStream.addTrack(newTrack);
         } catch (error) {
           console.error("[WebRTC] Failed to start camera:", error);
+          // Revert socket state if camera open failed
+          if (socket && meetingIdRef.current) {
+            socket.emit("meeting:media-state", {
+              meetingId: meetingIdRef.current,
+              isMuted: isMutedRef.current,
+              isVideoOn: false,
+            });
+          }
           throw error;
         }
       }
+
+      // Update local store and stream after async work is complete
+      useMeetingStore.getState().setIsVideoOn(enabled);
+      setLocalStream(freshStream);
 
       // Replace video track across all peers using precise video sender
       peerConnections.current.forEach((pc, peerId) => {
@@ -369,17 +388,6 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
           }
         }
       });
-
-      setLocalStream(freshStream);
-      useMeetingStore.getState().setIsVideoOn(enabled);
-
-      if (socket && meetingIdRef.current) {
-        socket.emit("meeting:media-state", {
-          meetingId: meetingIdRef.current,
-          isMuted: isMutedRef.current,
-          isVideoOn: enabled,
-        });
-      }
     },
     [setLocalStream, socket, startLocalStream]
   );
@@ -678,10 +686,10 @@ export function useWebRTC(socket: Socket | null, meetingId: string | null) {
         isVideoOn: remoteVideoOn,
       });
 
-      const pc = peerConnections.current.get(uId);
-      if (pc) {
-        syncPeerStream(pc, uId, updatePeer);
-      }
+      // Stream sync is NOT triggered here intentionally:
+      // isVideoOn/isMuted from the socket event IS the authoritative source.
+      // Calling syncPeerStream would recheck live track state which lags behind
+      // the socket signal and would silently re-override isVideoOn back to true.
     };
 
     // Screen share started: update store and re-sync presenter stream instantly

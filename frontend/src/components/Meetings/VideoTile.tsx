@@ -117,11 +117,11 @@ export function VideoTile({
 
   // Show avatar overlay when:
   // 1. No stream exists
-  // 2. Camera toggle is turned off (!isVideoOn)
-  // 3. For remote peer: active live video frames have not yet arrived (!hasLiveVideoTrack)
+  // 2. Camera toggle is explicitly off (!isVideoOn) — PRIMARY authoritative source
+  // 3. Camera is supposedly on but no live frames yet (only for remote, prevents black box on connection setup)
   const showAvatar =
     !hasStream ||
-    (!isScreenSharing && (!isVideoOn || (!isLocal && !hasLiveVideoTrack)));
+    (!isScreenSharing && (!isVideoOn || (isVideoOn && !isLocal && !hasLiveVideoTrack)));
 
   // Attach stream to video element when stream or video state changes
   useEffect(() => {
