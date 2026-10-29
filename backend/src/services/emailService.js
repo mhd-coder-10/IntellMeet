@@ -38,9 +38,10 @@ const getTransporter = async () => {
         user: smtpUser,
         pass: smtpPass,
       },
-      connectionTimeout: 15000,
-      greetingTimeout: 15000,
-      socketTimeout: 20000,
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000,
+      family: 4,
     });
     console.log(`[Email Service] Transporter initialized with SMTP host: ${smtpHost} (${smtpUser})`);
   } else if (smtpUser && smtpPass) {
@@ -53,9 +54,10 @@ const getTransporter = async () => {
           user: smtpUser,
           pass: smtpPass,
         },
-        connectionTimeout: 15000,
-        greetingTimeout: 15000,
-        socketTimeout: 20000,
+        connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000,
+      family: 4,
       });
       console.log(`[Email Service] Transporter initialized with service: ${service} (${smtpUser})`);
     } else {
@@ -67,9 +69,10 @@ const getTransporter = async () => {
           user: smtpUser,
           pass: smtpPass,
         },
-        connectionTimeout: 15000,
-        greetingTimeout: 15000,
-        socketTimeout: 20000,
+        connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000,
+      family: 4,
       });
       console.log(`[Email Service] Transporter initialized with smtp.gmail.com (${smtpUser})`);
     }
@@ -111,6 +114,78 @@ const getFromAddress = () => {
       : '"IntellMeet" <notifications@intellmeet.com>')
   );
 };
+
+// Dispatches email using HTTPS REST API (Port 443 - bypasses cloud/Render SMTP port blocking)
+// or standard SMTP transporter (local/VPS)
+const dispatchEmail = async ({ to, subject, html, from }) => {
+  // 1. Brevo REST API (HTTPS Port 443 - works on Render free tier without port blocking)
+  if (process.env.BREVO_API_KEY) {
+    try {
+      const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": process.env.BREVO_API_KEY,
+          "Content-Type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify({
+          sender: {
+            name: "IntellMeet",
+            email: process.env.SMTP_USER || "intellmeett16@gmail.com",
+          },
+          to: [{ email: to }],
+          subject,
+          htmlContent: html,
+        }),
+      });
+      if (res.ok) {
+        console.log(`[Email Service] Sent via Brevo HTTPS API to ${to}`);
+        return await res.json();
+      }
+      const errText = await res.text();
+      console.warn(`[Email Service] Brevo HTTPS error (${res.status}): ${errText}`);
+    } catch (e) {
+      console.warn("[Email Service] Brevo API dispatch error:", e.message);
+    }
+  }
+
+  // 2. Resend REST API (HTTPS Port 443)
+  if (process.env.RESEND_API_KEY) {
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: process.env.RESEND_FROM || "IntellMeet <onboarding@resend.dev>",
+          to: [to],
+          subject,
+          html,
+        }),
+      });
+      if (res.ok) {
+        console.log(`[Email Service] Sent via Resend HTTPS API to ${to}`);
+        return await res.json();
+      }
+      const errText = await res.text();
+      console.warn(`[Email Service] Resend HTTPS error (${res.status}): ${errText}`);
+    } catch (e) {
+      console.warn("[Email Service] Resend API dispatch error:", e.message);
+    }
+  }
+
+  // 3. Fallback to direct SMTP transporter
+  const t = await getTransporter();
+  return await t.sendMail({
+    from: from || getFromAddress(),
+    to,
+    subject,
+    html,
+  });
+};
+
 
 // Formats date and time into readable string (e.g., "Wednesday, Oct 14, 2026 at 7:30 PM")
 const formatDateTime = (date) => {
@@ -270,8 +345,7 @@ const sendMeetingInviteEmail = async ({
 
     const fromAddress = getFromAddress();
 
-    await t.sendMail({
-      from: fromAddress,
+    await dispatchEmail({
       to: recipientEmail,
       subject: `📅 Meeting Invitation: "${meeting.title}"`,
       html,
@@ -380,8 +454,7 @@ const sendMeetingUpdatedEmail = async ({
       accentColor: "#f59e0b",
     });
 
-    await t.sendMail({
-      from: getFromAddress(),
+    await dispatchEmail({
       to: recipientEmail,
       subject: `🔄 Meeting Details Updated: "${meeting.title}"`,
       html,
@@ -424,8 +497,7 @@ const sendMeetingCancelledEmail = async ({
       accentColor: "#ef4444",
     });
 
-    await t.sendMail({
-      from: getFromAddress(),
+    await dispatchEmail({
       to: recipientEmail,
       subject: `❌ Meeting Cancelled: "${meeting.title}"`,
       html,
@@ -468,8 +540,7 @@ const sendMeetingEndedEmail = async ({
       accentColor: "#10b981",
     });
 
-    await t.sendMail({
-      from: getFromAddress(),
+    await dispatchEmail({
       to: recipientEmail,
       subject: `📋 Meeting Summary & Recording: "${meeting.title}"`,
       html,
@@ -513,8 +584,7 @@ const sendMeetingExpiredEmail = async ({
       accentColor: "#f59e0b",
     });
 
-    await t.sendMail({
-      from: getFromAddress(),
+    await dispatchEmail({
       to: recipientEmail,
       subject: `⚠️ Meeting Expired: "${meeting.title}"`,
       html,
@@ -555,8 +625,7 @@ const sendWorkspaceJoinRequestAcceptedEmail = async ({
       accentColor: "#10b981",
     });
 
-    await t.sendMail({
-      from: getFromAddress(),
+    await dispatchEmail({
       to: recipientEmail,
       subject: `🎉 Workspace Join Request Approved: "${team.name}"`,
       html,
@@ -600,8 +669,7 @@ const sendWorkspaceRoleUpdatedEmail = async ({
       accentColor: "#6366f1",
     });
 
-    await t.sendMail({
-      from: getFromAddress(),
+    await dispatchEmail({
       to: recipientEmail,
       subject: `🛡️ Workspace Role Updated: ${roleTitle} in "${team.name}"`,
       html,
@@ -642,8 +710,7 @@ const sendWorkspaceRemovedEmail = async ({
       accentColor: "#ef4444",
     });
 
-    await t.sendMail({
-      from: getFromAddress(),
+    await dispatchEmail({
       to: recipientEmail,
       subject: `ℹ️ Notice: Removed from workspace "${team.name}"`,
       html,
@@ -711,8 +778,7 @@ const sendSignupOtpEmail = async ({
     </html>
     `;
 
-    await t.sendMail({
-      from: fromAddress,
+    await dispatchEmail({
       to: recipientEmail,
       subject: `🔐 Your IntellMeet Verification Code: ${otp}`,
       html,
