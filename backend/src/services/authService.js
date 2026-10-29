@@ -31,33 +31,17 @@ const sendSignupOtp = async ({ email, name }) => {
     otp,
   })
 
-  // Send Email with OTP (await delivery so failure is properly reported to user)
-  try {
-    await emailService.sendSignupOtpEmail({
-      recipientEmail: normalizedEmail,
-      recipientName: name || "there",
-      otp,
-    });
-  } catch (err) {
-    console.error(`[OTP Delivery Error] SMTP send failed: ${err.message}`);
-    // If SMTP timed out (e.g. Render free tier blocks outbound SMTP ports 25, 465, 587)
-    if (
-      err.message.includes("timeout") ||
-      err.message.includes("ETIMEDOUT") ||
-      err.message.includes("ESOCKETTIMEDOUT")
-    ) {
-      console.warn(
-        `[OTP Fallback] Cloud provider blocked SMTP ports. Returning previewOtp for verification: ${otp}`
-      );
-      return {
-        message: "Verification code created. (SMTP port blocked by hosting; code provided)",
-        previewOtp: otp,
-      };
-    }
-    const error = new Error(`Failed to deliver verification code email: ${err.message}`);
-    error.statusCode = 500;
-    throw error;
-  }
+  // Send Email asynchronously without blocking response
+  // Even if SMTP fails (e.g. cloud hosting port blocking), user is not stuck
+  let emailSent = true
+  emailService.sendSignupOtpEmail({
+    recipientEmail: normalizedEmail,
+    recipientName: name || "there",
+    otp,
+  }).catch((err) => {
+    emailSent = false
+    console.warn(`[OTP Delivery Warning] SMTP send failed (${err.message}). OTP created in database.`)
+  })
 
   return {
     message: "Verification code sent to your email",

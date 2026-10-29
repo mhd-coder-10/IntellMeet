@@ -65,15 +65,9 @@ export function RegisterForm() {
         const { email, name } = getValues()
         setIsLoading(true)
         try {
-            const res: any = await sendSignupOtp({ email, name })
-            const previewOtp = res?.data?.previewOtp || res?.previewOtp
-            if (previewOtp) {
-                setOtpCode(previewOtp)
-                toast.info(`Verification code: ${previewOtp} (Cloud hosting blocked SMTP; code auto-filled)`, { duration: 12000 })
-            } else {
-                setOtpCode('')
-                toast.success(`Verification code sent to ${email}. Please check your inbox.`)
-            }
+            await sendSignupOtp({ email, name })
+            setOtpCode('')
+            toast.success(`Verification code sent to ${email}. Please check your inbox.`)
             setStep(2)
             setResendCooldown(60)
             setOtpError('')
@@ -92,15 +86,9 @@ export function RegisterForm() {
         const { email, name } = getValues()
         setIsResending(true)
         try {
-            const res: any = await sendSignupOtp({ email, name })
-            const previewOtp = res?.data?.previewOtp || res?.previewOtp
-            if (previewOtp) {
-                setOtpCode(previewOtp)
-                toast.info(`New verification code: ${previewOtp} (Auto-filled)`, { duration: 12000 })
-            } else {
-                setOtpCode('')
-                toast.success('A new verification code has been sent to your email!')
-            }
+            await sendSignupOtp({ email, name })
+            setOtpCode('')
+            toast.success('A new verification code has been sent to your email!')
             setResendCooldown(60)
             setOtpError('')
         } catch (error: any) {
@@ -356,8 +344,8 @@ export function RegisterForm() {
                             onClick={handleResendOtp}
                             disabled={resendCooldown > 0 || isResending}
                             className={`font-semibold flex items-center gap-1 transition-colors cursor-pointer ${resendCooldown > 0
-                                    ? 'text-slate-400 cursor-not-allowed'
-                                    : 'text-blue-600 hover:text-blue-800'
+                                ? 'text-slate-400 cursor-not-allowed'
+                                : 'text-blue-600 hover:text-blue-800'
                                 }`}
                         >
                             <RefreshCw className={`w-3 h-3 ${isResending ? 'animate-spin' : ''}`} />
