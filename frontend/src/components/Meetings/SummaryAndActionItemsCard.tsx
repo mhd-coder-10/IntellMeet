@@ -114,15 +114,23 @@ export function SummaryAndActionItemsCard({
       );
     };
 
-    const handleSummaryDeleted = () => {
+    const handleSummaryDeleted = (payload?: { deletedBy?: string }) => {
       queryClient.setQueryData(["meeting-summary", meetingId], {
         summary: null,
         actionItems: [],
       });
-      toast.info("Meeting summary was deleted by the host.");
+      // Do not notify the host/initiator who already received mutation success toast
+      const isActor =
+        (payload?.deletedBy && String(payload.deletedBy) === String(currentUserId)) ||
+        isHost;
+      if (!isActor) {
+        toast.info("Meeting summary was deleted by the host.", {
+          id: `summary-deleted-${meetingId}`,
+        });
+      }
     };
 
-    const handleSummaryTrusted = (payload: { summary: any }) => {
+    const handleSummaryTrusted = (payload: { summary: any; trustedBy?: string }) => {
       queryClient.setQueryData(
         ["meeting-summary", meetingId],
         (old: MeetingSummaryResponse | undefined) => {
@@ -130,7 +138,15 @@ export function SummaryAndActionItemsCard({
           return { ...old, summary: payload.summary };
         }
       );
-      toast.success("Summary verified & marked as trusted by host!");
+      // Do not notify the host/initiator who already received mutation success toast
+      const isActor =
+        (payload?.trustedBy && String(payload.trustedBy) === String(currentUserId)) ||
+        isHost;
+      if (!isActor) {
+        toast.success("Summary verified & marked as trusted by host!", {
+          id: `summary-trusted-${meetingId}`,
+        });
+      }
     };
 
     const handleSummaryCompleted = () => {
@@ -164,7 +180,7 @@ export function SummaryAndActionItemsCard({
       socket.off("summary:trusted", handleSummaryTrusted);
       socket.off("summary:completed", handleSummaryCompleted);
     };
-  }, [socket, isConnected, meetingId, queryClient]);
+  }, [socket, isConnected, meetingId, queryClient, isHost, currentUserId]);
 
   // Inline editing state
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -242,7 +258,9 @@ export function SummaryAndActionItemsCard({
         }
       );
       setIsTrustConfirmOpen(false);
-      toast.success("Summary marked as Trusted & Finalized!");
+      toast.success("Summary marked as Trusted & Finalized!", {
+        id: `summary-trusted-host-${meetingId}`,
+      });
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.message || "Failed to mark summary as trusted");
@@ -258,7 +276,9 @@ export function SummaryAndActionItemsCard({
         actionItems: [],
       });
       setIsDeleteSummaryConfirmOpen(false);
-      toast.success("Summary and action items deleted successfully");
+      toast.success("Summary and action items deleted successfully", {
+        id: `summary-deleted-host-${meetingId}`,
+      });
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.message || "Failed to delete summary");

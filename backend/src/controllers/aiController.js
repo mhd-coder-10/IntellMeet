@@ -198,8 +198,7 @@ const deleteSummary = async (req, res) => {
 
     const io = req.app.get("io");
     if (io) {
-      io.to(meetingId).emit("summary:deleted", { meetingId });
-      io.emit("summary:deleted", { meetingId });
+      io.to(meetingId).emit("summary:deleted", { meetingId, deletedBy: req.user?.id });
     }
 
     res.status(200).json({
@@ -223,8 +222,7 @@ const trustSummary = async (req, res) => {
 
     const io = req.app.get("io");
     if (io) {
-      io.to(meetingId).emit("summary:trusted", { meetingId, summary });
-      io.emit("summary:trusted", { meetingId, summary });
+      io.to(meetingId).emit("summary:trusted", { meetingId, summary, trustedBy: req.user?.id });
     }
 
     res.status(200).json({
