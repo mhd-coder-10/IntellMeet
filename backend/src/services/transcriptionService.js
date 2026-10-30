@@ -256,7 +256,56 @@ const generateTranscript = async (meetingId, userId, options = {}) => {
 };
 
 /**
- * Call Google Gemini API (gemini-3.8-flash / gemini-3.5-transcribe) to transcribe actual audio
+ * Upload buffer to Google Gemini Resumable File API for large audio/video files (> 8MB)
+ */
+const uploadBufferToGeminiFileApi = async (buffer, mimeType, apiKey) => {
+  try {
+    const initRes = await fetch(
+      `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "X-Goog-Upload-Protocol": "resumable",
+          "X-Goog-Upload-Command": "start",
+          "X-Goog-Upload-Header-Content-Length": buffer.length.toString(),
+          "X-Goog-Upload-Header-Content-Type": mimeType,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ file: { display_name: `recording_${Date.now()}` } }),
+      }
+    );
+
+    const uploadUrl = initRes.headers.get("x-goog-upload-url");
+    if (!uploadUrl) {
+      console.warn("[Gemini File API] No upload URL returned, HTTP:", initRes.status);
+      return null;
+    }
+
+    const upRes = await fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        "Content-Length": buffer.length.toString(),
+        "X-Goog-Upload-Offset": "0",
+        "X-Goog-Upload-Command": "upload, finalize",
+      },
+      body: buffer,
+    });
+
+    const data = await upRes.json();
+    if (data?.file?.uri) {
+      return {
+        fileUri: data.file.uri,
+        fileName: data.file.name,
+      };
+    }
+  } catch (err) {
+    console.warn("[Gemini File API] Upload failed:", err.message);
+  }
+  return null;
+};
+
+/**
+ * Call Google Gemini API (gemini-3.5-flash / gemini-3.1-flash-lite) to transcribe actual audio
  */
 const callGeminiAudioTranscription = async (audioUrl, meeting, defaultDuration) => {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -289,7 +338,24 @@ const callGeminiAudioTranscription = async (audioUrl, meeting, defaultDuration) 
     throw new Error(`Audio recording file could not be read from "${audioUrl}". Please verify the recording file exists.`);
   }
 
-  const base64Audio = audioBuffer.toString("base64");
+  // Check if buffer is large (> 8MB) — if so, upload via Gemini File API to avoid inline payload limits
+  let audioPart = null;
+  let uploadedFileMeta = null;
+
+  if (audioBuffer.length > 8 * 1024 * 1024) {
+    console.log(`[AI Transcription] File size ${(audioBuffer.length / (1024 * 1024)).toFixed(1)}MB > 8MB, uploading to Gemini File API...`);
+    uploadedFileMeta = await uploadBufferToGeminiFileApi(audioBuffer, mimeType, apiKey);
+    if (uploadedFileMeta?.fileUri) {
+      audioPart = { fileData: { fileUri: uploadedFileMeta.fileUri, mimeType } };
+    }
+  }
+
+  // Fallback to inlineData if not uploaded or for normal size files
+  if (!audioPart) {
+    const base64Audio = audioBuffer.toString("base64");
+    audioPart = { inlineData: { mimeType, data: base64Audio } };
+  }
+
   const hostName = meeting.host?.name || "Host";
 
   const prompt = `You are an expert audio transcription system.
@@ -338,7 +404,7 @@ If no human speech is spoken at all, return:
   "detectedLanguage": "en"
 }`;
 
-  // Helper to call a specific Gemini model without hard-enforced responseMimeType
+  // Helper to call a specific Gemini model
   const callModel = async (modelName) => {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
     const response = await fetch(endpoint, {
@@ -349,20 +415,19 @@ If no human speech is spoken at all, return:
           {
             parts: [
               { text: prompt },
-              { inlineData: { mimeType, data: base64Audio } }
-            ]
-          }
-        ]
-      })
+              audioPart,
+            ],
+          },
+        ],
+      }),
     });
     return response.json();
   };
 
   const candidateModels = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-flash-latest",
-    "gemini-1.5-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.8-flash",
   ];
   let data = null;
   let lastError = null;
@@ -382,6 +447,13 @@ If no human speech is spoken at all, return:
       lastError = err;
       console.warn(`[AI Transcription] Failed calling ${model}:`, err.message);
     }
+  }
+
+  // Cleanup uploaded file from Gemini if created
+  if (uploadedFileMeta?.fileName) {
+    fetch(`https://generativelanguage.googleapis.com/v1beta/${uploadedFileMeta.fileName}?key=${apiKey}`, {
+      method: "DELETE",
+    }).catch(() => {});
   }
 
   if (!data) {

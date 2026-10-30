@@ -191,9 +191,16 @@ export function SummaryAndActionItemsCard({
   const generateMutation = useMutation({
     mutationFn: () =>
       generateMeetingSummary(meetingId, { forceRegenerate: false }),
-    onSuccess: (data) => {
+    onSuccess: (data: any) => {
       queryClient.setQueryData(["meeting-summary", meetingId], data);
-      toast.success("AI Summary & Action Items generated successfully!");
+      if (data?.summary?.hasSpokenContent === false) {
+        toast.info(
+          "Audio processed: No spoken discussion detected in recording. Summary & action items are not applicable.",
+          { duration: 5000 }
+        );
+      } else {
+        toast.success("AI Summary & Action Items generated successfully!");
+      }
     },
     onError: (err: any) => {
       toast.error(

@@ -109,12 +109,19 @@ export function TranscriptCard({
         recordingIndex,
         forceRegenerate: true,
       }),
-    onSuccess: (data) => {
+    onSuccess: (data: any) => {
       queryClient.setQueryData(
         ["meeting-transcript", meetingId, recordingIndex],
         data
       );
-      toast.success("AI Transcript generated successfully!");
+      if (data?.hasSpokenContent === false || data?.segments?.length === 0) {
+        toast.info(
+          "Audio processed: No spoken discussion detected in recording (silence or background sound only).",
+          { duration: 5000 }
+        );
+      } else {
+        toast.success("AI Transcript generated successfully!");
+      }
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.message || "Failed to generate transcript");
