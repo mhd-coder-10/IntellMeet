@@ -1095,9 +1095,9 @@ return (
 
     {/* CREATE PROJECT BOARD MODAL */}
     {isCreateBoardOpen && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-xs overflow-y-auto">
-        <div className="relative w-full max-w-lg max-h-[90vh] my-auto flex flex-col rounded-2xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
-          <div className="flex items-center justify-between p-5 sm:p-6 pb-4 border-b border-slate-100 shrink-0">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
+        <div className="relative w-full max-w-lg max-h-[calc(100vh-2rem)] sm:max-h-[88vh] flex flex-col rounded-2xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 shrink-0 bg-white">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
                 <FolderKanban className="w-5 h-5" />
@@ -1134,10 +1134,10 @@ return (
                 memberIds: createBoardMembers,
               });
             }}
-            className="flex-1 flex flex-col overflow-hidden"
+            className="min-h-0 flex-1 flex flex-col overflow-hidden"
           >
-            <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
-              <div className="space-y-1.5">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5">
+              <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                   Board Name *
                 </label>
@@ -1145,12 +1145,12 @@ return (
                   value={boardName}
                   onChange={(e) => setBoardName(e.target.value)}
                   placeholder="e.g. Sprint 1, Mobile App MVP, Marketing Launch"
-                  className="h-10 sm:h-11 rounded-xl text-sm"
+                  className="h-10 rounded-xl text-xs sm:text-sm"
                   required
                 />
               </div>
 
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                   Description (Optional)
                 </label>
@@ -1159,11 +1159,11 @@ return (
                   onChange={(e) => setBoardDescription(e.target.value)}
                   placeholder="What is the goal or focus of this board?"
                   rows={2}
-                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
+                  className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
                 />
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                   Board Theme Accent
                 </label>
@@ -1173,7 +1173,7 @@ return (
                       key={c}
                       type="button"
                       onClick={() => setBoardColor(c)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold capitalize border transition ${boardColor === c
+                      className={`px-3 py-1 rounded-xl text-xs font-semibold capitalize border transition ${boardColor === c
                           ? "bg-slate-900 text-white border-slate-900 shadow-xs"
                           : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                         }`}
@@ -1185,7 +1185,7 @@ return (
               </div>
 
               {/* Assign Members to this Project */}
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                     Assign Workspace Members (Optional)
@@ -1199,7 +1199,7 @@ return (
                 <p className="text-[11px] text-slate-400">
                   Select which workspace members should be part of this project board.
                 </p>
-                <div className="max-h-32 overflow-y-auto space-y-1 rounded-xl border border-slate-200 p-2 bg-slate-50/50">
+                <div className="max-h-28 overflow-y-auto space-y-0.5 rounded-xl border border-slate-200 p-2 bg-slate-50/50">
                   {activeMembers.length > 0 ? (
                     activeMembers.map((m) => {
                       const uid = m.user?._id || (m.user as any);
@@ -1207,7 +1207,7 @@ return (
                       return (
                         <label
                           key={uid}
-                          className="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-white cursor-pointer transition text-xs text-slate-700 select-none"
+                          className="flex items-center gap-2.5 p-1 rounded-lg hover:bg-white cursor-pointer transition text-xs text-slate-700 select-none"
                         >
                           <input
                             type="checkbox"
@@ -1240,19 +1240,19 @@ return (
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-3 p-4 sm:px-6 border-t border-slate-100 bg-slate-50/50 shrink-0">
+            <div className="flex items-center justify-end gap-2.5 p-3.5 sm:px-5 border-t border-slate-100 bg-slate-50/90 shrink-0">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setIsCreateBoardOpen(false)}
-                className="rounded-xl border-slate-200 text-slate-600 text-xs h-10 px-4"
+                className="rounded-xl border-slate-200 text-slate-600 text-xs h-9 px-4"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 disabled={createProjectMutation.isPending || !boardName.trim()}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-xs h-10 px-5 shadow-xs"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-xs h-9 px-5 shadow-xs"
               >
                 {createProjectMutation.isPending ? "Creating..." : "Create Board"}
               </Button>
@@ -1374,25 +1374,25 @@ return (
 
     {/* EDIT PROJECT BOARD MODAL */}
     {isEditBoardOpen && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-        <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-white p-6 sm:p-8 shadow-xl border border-slate-200 space-y-6">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
+        <div className="relative w-full max-w-lg max-h-[calc(100vh-2rem)] sm:max-h-[88vh] flex flex-col rounded-2xl sm:rounded-3xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 shrink-0 bg-white">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
                 <Edit3 className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
                   Edit Project Board
                 </h3>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 mt-0.5">
                   Update board title, description, and visual theme.
                 </p>
               </div>
             </div>
             <button
               onClick={() => setIsEditBoardOpen(false)}
-              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100"
+              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1413,123 +1413,125 @@ return (
                 memberIds: editBoardMembers,
               });
             }}
-            className="space-y-4"
+            className="min-h-0 flex-1 flex flex-col overflow-hidden"
           >
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Board Title *
-              </label>
-              <Input
-                value={editBoardName}
-                onChange={(e) => setEditBoardName(e.target.value)}
-                placeholder="e.g. Q3 Product Roadmap"
-                className="h-11 rounded-xl text-sm"
-                required
-              />
-            </div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Board Title *
+                </label>
+                <Input
+                  value={editBoardName}
+                  onChange={(e) => setEditBoardName(e.target.value)}
+                  placeholder="e.g. Q3 Product Roadmap"
+                  className="h-10 rounded-xl text-xs sm:text-sm"
+                  required
+                />
+              </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Description
-              </label>
-              <textarea
-                value={editBoardDescription}
-                onChange={(e) => setEditBoardDescription(e.target.value)}
-                placeholder="Board purpose and sprint goals..."
-                rows={3}
-                className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
-              />
-            </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Description
+                </label>
+                <textarea
+                  value={editBoardDescription}
+                  onChange={(e) => setEditBoardDescription(e.target.value)}
+                  placeholder="Board purpose and sprint goals..."
+                  rows={2}
+                  className="w-full rounded-xl border border-slate-200 bg-white p-2.5 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
+                />
+              </div>
 
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Theme Accent Color
-              </label>
-              <div className="flex flex-wrap gap-2.5">
-                {Object.keys(boardColorThemes).map((cKey) => (
-                  <button
-                    key={cKey}
-                    type="button"
-                    onClick={() => setEditBoardColor(cKey)}
-                    className={`h-8 w-8 rounded-full border-2 flex items-center justify-center transition ${editBoardColor === cKey
-                        ? "border-slate-900 scale-110 shadow-sm"
-                        : "border-transparent opacity-75 hover:opacity-100"
-                      }`}
-                    style={{
-                      backgroundColor:
-                        cKey === "indigo"
-                          ? "#4f46e5"
-                          : cKey === "blue"
-                            ? "#2563eb"
-                            : cKey === "emerald"
-                              ? "#059669"
-                              : cKey === "purple"
-                                ? "#9333ea"
-                                : cKey === "amber"
-                                  ? "#d97706"
-                                  : "#e11d48",
-                    }}
-                  >
-                    {editBoardColor === cKey && <Check className="w-4 h-4 text-white" />}
-                  </button>
-                ))}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Theme Accent Color
+                </label>
+                <div className="flex flex-wrap gap-2.5">
+                  {Object.keys(boardColorThemes).map((cKey) => (
+                    <button
+                      key={cKey}
+                      type="button"
+                      onClick={() => setEditBoardColor(cKey)}
+                      className={`h-7 w-7 rounded-full border-2 flex items-center justify-center transition ${editBoardColor === cKey
+                          ? "border-slate-900 scale-110 shadow-xs"
+                          : "border-transparent opacity-75 hover:opacity-100"
+                        }`}
+                      style={{
+                        backgroundColor:
+                          cKey === "indigo"
+                            ? "#4f46e5"
+                            : cKey === "blue"
+                              ? "#2563eb"
+                              : cKey === "emerald"
+                                ? "#059669"
+                                : cKey === "purple"
+                                  ? "#9333ea"
+                                  : cKey === "amber"
+                                    ? "#d97706"
+                                    : "#e11d48",
+                      }}
+                    >
+                      {editBoardColor === cKey && <Check className="w-3.5 h-3.5 text-white" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Manage Members in Edit Modal */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+                  Project Members
+                </label>
+                <p className="text-[11px] text-slate-400">
+                  Select which workspace members have access to this board.
+                </p>
+                <div className="max-h-28 overflow-y-auto space-y-0.5 rounded-xl border border-slate-200 p-2 bg-slate-50/50">
+                  {activeMembers.length > 0 ? (
+                    activeMembers.map((m) => {
+                      const uid = m.user?._id || (m.user as any);
+                      const isSelected = editBoardMembers.includes(uid);
+                      return (
+                        <label
+                          key={uid}
+                          className="flex items-center gap-2.5 p-1 rounded-lg hover:bg-white cursor-pointer transition text-xs text-slate-700 select-none"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setEditBoardMembers((prev) => [...prev, uid]);
+                              } else {
+                                setEditBoardMembers((prev) => prev.filter((id) => id !== uid));
+                              }
+                            }}
+                            className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                          />
+                          <span className="font-medium text-slate-900">{m.user?.name}</span>
+                          <span className="text-slate-400 text-[11px]">(@{m.user?.username || m.user?.email})</span>
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <p className="text-xs text-slate-400 italic p-1">No other members in workspace.</p>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Manage Members in Edit Modal */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
-                Project Members
-              </label>
-              <p className="text-[11px] text-slate-400">
-                Select which workspace members have access to this board.
-              </p>
-              <div className="max-h-36 overflow-y-auto space-y-1 rounded-xl border border-slate-200 p-2 bg-slate-50/50">
-                {activeMembers.length > 0 ? (
-                  activeMembers.map((m) => {
-                    const uid = m.user?._id || (m.user as any);
-                    const isSelected = editBoardMembers.includes(uid);
-                    return (
-                      <label
-                        key={uid}
-                        className="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-white cursor-pointer transition text-xs text-slate-700"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setEditBoardMembers((prev) => [...prev, uid]);
-                            } else {
-                              setEditBoardMembers((prev) => prev.filter((id) => id !== uid));
-                            }
-                          }}
-                          className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                        />
-                        <span className="font-medium text-slate-900">{m.user?.name}</span>
-                        <span className="text-slate-400 text-[11px]">(@{m.user?.username || m.user?.email})</span>
-                      </label>
-                    );
-                  })
-                ) : (
-                  <p className="text-xs text-slate-400 italic p-1">No other members in workspace.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-3">
+            <div className="flex items-center justify-end gap-2.5 p-3.5 sm:px-5 border-t border-slate-100 bg-slate-50/90 shrink-0">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setIsEditBoardOpen(false)}
-                className="rounded-xl border-slate-200 text-slate-600 text-xs h-10"
+                className="rounded-xl border-slate-200 text-slate-600 text-xs h-9 px-4"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 disabled={updateProjectMutation.isPending || !editBoardName.trim()}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-xs h-10 px-5 shadow-xs"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-xs h-9 px-5 shadow-xs"
               >
                 {updateProjectMutation.isPending ? "Saving..." : "Save Changes"}
               </Button>

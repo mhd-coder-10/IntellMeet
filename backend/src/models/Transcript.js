@@ -86,6 +86,19 @@ const transcriptSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    hasSpokenContent: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    contentNotice: {
+      type: String,
+      default: null,
+    },
+    detectedSoundType: {
+      type: String,
+      default: "speech",
+    },
     segments: [transcriptSegmentSchema],
     error: {
       type: String,

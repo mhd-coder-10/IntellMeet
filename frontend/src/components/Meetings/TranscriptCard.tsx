@@ -19,6 +19,9 @@ import {
   Cpu,
   AlignLeft,
   ListFilter,
+  VolumeX,
+  Music,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -190,6 +193,15 @@ export function TranscriptCard({
   const providerLabel = useMemo(() => {
     return "AI Intelligence";
   }, []);
+
+  const isNonVerbalAudio = useMemo(() => {
+    if (!transcript) return false;
+    if (transcript.hasSpokenContent === false) return true;
+    if (!transcript.segments || transcript.segments.length === 0) return true;
+    return /no spoken discussion|no audible speech|background sound only|pure silence|ambient audio/i.test(
+      transcript.fullText || ""
+    );
+  }, [transcript]);
 
   return (
     <div className="rounded-2xl border border-slate-200 shadow-sm overflow-hidden bg-white">
@@ -379,6 +391,39 @@ export function TranscriptCard({
         ) : (
           /* Active Transcript View */
           <div className="space-y-4">
+            {/* Non-Verbal Audio Notice Banner (Silence, Music, or Non-Verbal Audio) */}
+            {isNonVerbalAudio && (
+              <div className="p-4 rounded-xl border border-amber-200/90 bg-amber-50/80 text-amber-900 space-y-2 shadow-xs">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
+                    {transcript.detectedSoundType === "music" ? (
+                      <Music className="w-5 h-5 text-amber-700" />
+                    ) : (
+                      <VolumeX className="w-5 h-5 text-amber-700" />
+                    )}
+                  </div>
+                  <div className="space-y-1 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-xs font-bold text-amber-950 uppercase tracking-wider">
+                        No Spoken Discussion Detected in Audio
+                      </h4>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900 capitalize">
+                        {transcript.detectedSoundType === "music" ? "Music / Instrumental" : "Silence / Ambient"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-800 leading-relaxed font-normal">
+                      {transcript.contentNotice ||
+                        "This recording contains only silence, background music, or non-verbal sound. Because no participants spoke during the meeting, dialogue transcripts and summaries cannot be generated."}
+                    </p>
+                    <div className="flex items-center gap-1.5 text-[11px] text-amber-700 pt-0.5 font-medium">
+                      <Info className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span>Even short spoken greetings like &quot;Hi&quot;, &quot;Hello&quot;, or testing words are automatically detected and transcribed verbatim.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Search Bar & View Mode Toggle */}
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="relative flex-1 min-w-[200px] max-w-md">

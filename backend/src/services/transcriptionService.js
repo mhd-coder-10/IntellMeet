@@ -235,6 +235,9 @@ const generateTranscript = async (meetingId, userId, options = {}) => {
     transcript.fullText = result.fullText;
     transcript.duration = result.duration;
     transcript.wordCount = result.wordCount;
+    transcript.hasSpokenContent = typeof result.hasSpokenContent === "boolean" ? result.hasSpokenContent : true;
+    transcript.contentNotice = result.contentNotice || null;
+    transcript.detectedSoundType = result.detectedSoundType || "speech";
     transcript.provider = result.provider || "ai-transcription";
     transcript.status = "completed";
     transcript.error = null;
@@ -293,35 +296,45 @@ const callGeminiAudioTranscription = async (audioUrl, meeting, defaultDuration) 
 Meeting Title: "${meeting.title || 'Meeting'}"
 Host: "${hostName}"
 
-Listen carefully to the provided audio file and transcribe the actual spoken words, dialogue, conversations, or song lyrics verbatim.
-Do not hallucinate topics that are not in the audio.
-If the audio has songs, speeches, background discussion, or dialogue, transcribe exactly what you hear.
-Provide your response strictly in valid JSON format matching this structure:
+TASK INSTRUCTIONS:
+1. HUMAN SPEECH DETECTION (CRITICAL):
+   - Listen very carefully to the entire audio for ANY human spoken dialogue, utterances, or words.
+   - Minimal speech MUST be captured! If someone speaks even single words or brief greetings like "hi", "hello", "hey", "testing 1 2 3", "yes", "no", "namaste", "bye", or short phrases, you MUST transcribe them verbatim with timestamps and set "hasSpokenContent": true.
+   - If there is normal discussion or conversation, transcribe every dialogue turn verbatim with timestamps and set "hasSpokenContent": true.
+
+2. NON-VERBAL RECORDINGS (SILENCE, BACKGROUND MUSIC, NOISE):
+   - If the audio has NO human speech or spoken words (for example: pure silence, instrumental background music, humming, ambient room static, coughs, or nobody speaks throughout the recording):
+   - You MUST set "hasSpokenContent": false.
+   - Set "detectedSoundType": "music" (if instrumental/music), "silence" (if quiet/silent), or "ambient_noise" (if noise/static).
+   - Set "noticeMessage": "No spoken discussion detected in this recording (silence, background music, or non-verbal audio only). This audio is not suitable for generating a dialogue transcript or meeting summary."
+   - Set "segments": []
+   - Set "fullText": "No spoken discussion detected in this recording (silence, background music, or non-verbal sound only)."
+
+Provide your response STRICTLY as valid JSON matching this schema:
 {
+  "hasSpokenContent": true,
+  "detectedSoundType": "speech",
+  "noticeMessage": null,
   "segments": [
     {
       "id": "seg-1",
       "speaker": "${hostName}",
       "startTime": 0,
       "endTime": 5,
-      "text": "Exact words spoken or heard"
+      "text": "Exact words spoken"
     }
   ],
   "fullText": "Full complete transcription text",
   "detectedLanguage": "en"
 }
-If no audible speech is detected (e.g., pure silence), return:
+
+If no human speech is spoken at all, return:
 {
-  "segments": [
-    {
-      "id": "seg-1",
-      "speaker": "${hostName}",
-      "startTime": 0,
-      "endTime": 2,
-      "text": "[Background sound / No audible speech detected in this recording]"
-    }
-  ],
-  "fullText": "[Background sound / No audible speech detected in this recording]",
+  "hasSpokenContent": false,
+  "detectedSoundType": "music",
+  "noticeMessage": "No spoken discussion detected in this recording (silence, background music, or non-verbal audio only). This audio is not suitable for generating a dialogue transcript or meeting summary.",
+  "segments": [],
+  "fullText": "No spoken discussion detected in this recording (silence, background music, or non-verbal sound only).",
   "detectedLanguage": "en"
 }`;
 
@@ -346,11 +359,10 @@ If no audible speech is detected (e.g., pure silence), return:
   };
 
   const candidateModels = [
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-flash-latest",
     "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-flash-latest",
+    "gemini-1.5-flash",
   ];
   let data = null;
   let lastError = null;
@@ -391,23 +403,56 @@ If no audible speech is detected (e.g., pure silence), return:
     } catch {}
   }
 
+  let hasSpokenContent = true;
+  let contentNotice = null;
+  let detectedSoundType = "speech";
   let segments = [];
   let fullText = "";
 
-  if (parsed && Array.isArray(parsed.segments) && parsed.segments.length > 0) {
-    segments = parsed.segments.map((seg, idx) => ({
-      id: seg.id || `seg-${idx + 1}`,
-      speaker: seg.speaker || hostName,
-      startTime: typeof seg.startTime === "number" ? Math.round(seg.startTime) : idx * 5,
-      endTime: typeof seg.endTime === "number" ? Math.round(seg.endTime) : (idx + 1) * 5,
-      text: (seg.text || "").trim(),
-      confidence: 0.98,
-    }));
-    fullText = parsed.fullText || segments.map((s) => s.text).join(" ");
+  const isExplicitlyNonVerbal =
+    parsed?.hasSpokenContent === false ||
+    (parsed?.segments && parsed.segments.length === 0) ||
+    /no audible speech|background sound|no spoken discussion|pure silence|ambient audio/i.test(parsed?.fullText || rawJsonText);
+
+  if (isExplicitlyNonVerbal && (!parsed?.segments || parsed.segments.length === 0)) {
+    hasSpokenContent = false;
+    detectedSoundType = parsed?.detectedSoundType || "non_verbal";
+    contentNotice =
+      parsed?.noticeMessage ||
+      "No spoken discussion detected in this recording (silence, background music, or non-verbal sound only). This audio is not suitable for generating a dialogue transcript or meeting summary.";
+    fullText = parsed?.fullText || contentNotice;
+    segments = [];
+  } else if (parsed && Array.isArray(parsed.segments) && parsed.segments.length > 0) {
+    // Check if segments are only dummy placeholders like "[Background sound...]"
+    const allSegmentsNonVerbal = parsed.segments.every((s) =>
+      /no audible speech|background sound|no spoken discussion|ambient audio|pure silence/i.test(s.text || "")
+    );
+    if (allSegmentsNonVerbal) {
+      hasSpokenContent = false;
+      detectedSoundType = parsed?.detectedSoundType || "non_verbal";
+      contentNotice =
+        "No spoken discussion detected in this recording (silence, background music, or non-verbal sound only). This audio is not suitable for generating a dialogue transcript or meeting summary.";
+      fullText = contentNotice;
+      segments = [];
+    } else {
+      hasSpokenContent = true;
+      contentNotice = null;
+      detectedSoundType = "speech";
+      segments = parsed.segments.map((seg, idx) => ({
+        id: seg.id || `seg-${idx + 1}`,
+        speaker: seg.speaker || hostName,
+        startTime: typeof seg.startTime === "number" ? Math.round(seg.startTime) : idx * 5,
+        endTime: typeof seg.endTime === "number" ? Math.round(seg.endTime) : (idx + 1) * 5,
+        text: (seg.text || "").trim(),
+        confidence: 0.98,
+      }));
+      fullText = parsed.fullText || segments.map((s) => s.text).join(" ");
+    }
   } else {
     // If model returned plain dialogue text or unformatted sentences
     const cleanText = rawJsonText.replace(/```json/gi, "").replace(/```/g, "").trim();
-    if (cleanText) {
+    if (cleanText && !/no audible speech|background sound|no spoken discussion|pure silence/i.test(cleanText)) {
+      hasSpokenContent = true;
       fullText = cleanText;
       const sentences = cleanText.split(/(?<=[.?!])\s+/).filter(Boolean);
       const segDur = Math.max(2, Math.round(defaultDuration / Math.max(1, sentences.length)));
@@ -420,29 +465,28 @@ If no audible speech is detected (e.g., pure silence), return:
         confidence: 0.95,
       }));
     } else {
-      fullText = "[Low volume speech or ambient audio detected]";
-      segments = [
-        {
-          id: "seg-1",
-          speaker: hostName,
-          startTime: 0,
-          endTime: Math.min(5, defaultDuration || 5),
-          text: "[Low volume speech or ambient audio detected]",
-          confidence: 0.9,
-        },
-      ];
+      hasSpokenContent = false;
+      detectedSoundType = "silence";
+      contentNotice =
+        "No spoken discussion detected in this recording (silence, background music, or non-verbal sound only). This audio is not suitable for generating a dialogue transcript or meeting summary.";
+      fullText = contentNotice;
+      segments = [];
     }
   }
 
-  const computedDuration = segments.length > 0 
-    ? Math.max(segments[segments.length - 1].endTime, defaultDuration || 10)
-    : (defaultDuration || 10);
+  const computedDuration =
+    segments.length > 0
+      ? Math.max(segments[segments.length - 1].endTime, defaultDuration || 10)
+      : (defaultDuration || 10);
 
   return {
     segments,
     fullText,
+    hasSpokenContent,
+    contentNotice,
+    detectedSoundType,
     duration: Math.round(computedDuration),
-    wordCount: fullText.split(/\s+/).filter(Boolean).length,
+    wordCount: hasSpokenContent ? fullText.split(/\s+/).filter(Boolean).length : 0,
     provider: "ai-transcription",
   };
 };

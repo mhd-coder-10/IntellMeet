@@ -34,6 +34,15 @@ const summarySchema = new mongoose.Schema(
       enum: ["productive", "positive", "neutral", "constructive", "urgent"],
       default: "productive",
     },
+    hasSpokenContent: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    contentNotice: {
+      type: String,
+      default: null,
+    },
     status: {
       type: String,
       enum: ["pending", "processing", "completed", "failed"],

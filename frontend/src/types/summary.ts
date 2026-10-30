@@ -12,6 +12,8 @@ export interface MeetingSummary {
   keyPoints: string[];
   decisions: string[];
   sentiment: SummarySentiment;
+  hasSpokenContent?: boolean;
+  contentNotice?: string | null;
   status: "pending" | "processing" | "completed" | "failed";
   provider: string;
   wordCount: number;

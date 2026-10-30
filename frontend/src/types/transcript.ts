@@ -22,6 +22,9 @@ export interface MeetingTranscript {
   duration: number; // seconds
   wordCount: number;
   fullText: string;
+  hasSpokenContent?: boolean;
+  contentNotice?: string | null;
+  detectedSoundType?: string | null;
   segments: TranscriptSegment[];
   error?: string | null;
   createdAt: string;

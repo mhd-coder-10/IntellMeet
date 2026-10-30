@@ -66,6 +66,66 @@ const generateSummary = async (meetingId, userId, options = {}) => {
     throw error;
   }
 
+  // Detect if recording has no spoken discussion (silence, music, or non-verbal audio only)
+  const isNonVerbal =
+    transcript.hasSpokenContent === false ||
+    (Array.isArray(transcript.segments) && transcript.segments.length === 0) ||
+    /no spoken discussion|no audible speech|background sound only|pure silence|ambient audio/i.test(transcript.fullText || "");
+
+  if (isNonVerbal) {
+    console.log(`[AI Summary] Transcript indicates non-verbal audio for meeting "${meeting.title}". Storing informative non-verbal summary without external AI overhead.`);
+
+    // If previous AI action items existed, clear them so phantom tasks are not displayed
+    const oldAiItems = await ActionItem.find({ meeting: meetingId, isAiGenerated: true });
+    if (oldAiItems.length > 0) {
+      const Task = require("../models/Task");
+      const oldTaskIds = oldAiItems.map((i) => i.convertedTask).filter(Boolean);
+      if (oldTaskIds.length > 0) {
+        await Task.deleteMany({ _id: { $in: oldTaskIds } });
+      }
+      await ActionItem.deleteMany({ meeting: meetingId, isAiGenerated: true });
+    }
+
+    const nonVerbalOverview =
+      transcript.contentNotice ||
+      "No spoken discussion was detected in the meeting recording (only silence, background music, or non-verbal audio). A meeting summary and action items cannot be generated because there was no verbal conversation.";
+
+    if (!existingSummary) {
+      existingSummary = new Summary({
+        meeting: meetingId,
+        overview: nonVerbalOverview,
+        keyPoints: ["No spoken discussion or verbal topics detected in the recording."],
+        decisions: [],
+        sentiment: "neutral",
+        status: "completed",
+        hasSpokenContent: false,
+        contentNotice: nonVerbalOverview,
+        provider: "ai-transcription-detection",
+        wordCount: 0,
+        sourceTextLength: 0,
+        generatedBy: userId,
+      });
+    } else {
+      existingSummary.overview = nonVerbalOverview;
+      existingSummary.keyPoints = ["No spoken discussion or verbal topics detected in the recording."];
+      existingSummary.decisions = [];
+      existingSummary.sentiment = "neutral";
+      existingSummary.status = "completed";
+      existingSummary.hasSpokenContent = false;
+      existingSummary.contentNotice = nonVerbalOverview;
+      existingSummary.provider = "ai-transcription-detection";
+      existingSummary.wordCount = 0;
+      existingSummary.sourceTextLength = 0;
+      existingSummary.generatedBy = userId;
+    }
+    await existingSummary.save();
+
+    return {
+      summary: existingSummary,
+      actionItems: [],
+    };
+  }
+
   const transcriptText = transcript.fullText.trim();
   const hostName = meeting.host?.name || "Host";
   const participantsList = [
@@ -132,11 +192,10 @@ Respond STRICTLY with valid JSON matching this schema:
   }
 
   const candidateModels = [
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-flash-latest",
     "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-flash-latest",
+    "gemini-1.5-flash",
   ];
   let rawResponse = null;
   let lastError = null;
@@ -209,6 +268,8 @@ Respond STRICTLY with valid JSON matching this schema:
       decisions,
       sentiment,
       status: "completed",
+      hasSpokenContent: true,
+      contentNotice: null,
       provider: "ai-intelligence",
       wordCount: overview.split(/\s+/).filter(Boolean).length,
       sourceTextLength: transcriptText.length,
@@ -220,6 +281,8 @@ Respond STRICTLY with valid JSON matching this schema:
     existingSummary.decisions = decisions;
     existingSummary.sentiment = sentiment;
     existingSummary.status = "completed";
+    existingSummary.hasSpokenContent = true;
+    existingSummary.contentNotice = null;
     existingSummary.wordCount = overview.split(/\s+/).filter(Boolean).length;
     existingSummary.sourceTextLength = transcriptText.length;
     existingSummary.generatedBy = userId;

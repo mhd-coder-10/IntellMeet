@@ -28,6 +28,8 @@ import {
   FolderKanban,
   ShieldCheck,
   AlertCircle,
+  VolumeX,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -547,7 +549,17 @@ export function SummaryAndActionItemsCard({
   const completionPercentage = useMemo(() => {
     if (actionItems.length === 0) return 0;
     return Math.round((completedCount / actionItems.length) * 100);
-  }, [completedCount, actionItems.length]); return (
+  }, [completedCount, actionItems.length]);
+
+  const isNonVerbalSummary = useMemo(() => {
+    if (!summary) return false;
+    if (summary.hasSpokenContent === false) return true;
+    return /no spoken discussion|no audible speech|background sound only|pure silence|ambient audio/i.test(
+      summary.overview || ""
+    );
+  }, [summary]);
+
+  return (
     <div className="rounded-2xl border border-slate-200 shadow-sm overflow-hidden bg-white">
       {/* Header Bar */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white p-3.5 sm:p-4 border-b border-slate-800">
@@ -793,6 +805,35 @@ export function SummaryAndActionItemsCard({
         ) : (
           /* Active Summary & Action Items View */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Non-Verbal Audio Notice Banner */}
+            {isNonVerbalSummary && (
+              <div className="col-span-1 lg:col-span-12 p-4 rounded-xl border border-amber-200/90 bg-amber-50/80 text-amber-900 shadow-xs space-y-2">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
+                    <VolumeX className="w-5 h-5 text-amber-700" />
+                  </div>
+                  <div className="space-y-1 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-xs font-bold text-amber-950 uppercase tracking-wider">
+                        No Spoken Discussion Detected in Audio
+                      </h4>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900">
+                        Summary Not Applicable
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-800 leading-relaxed font-normal">
+                      {summary.overview ||
+                        "No spoken discussion was detected in the meeting recording (only silence, background music, or non-verbal audio). A meeting summary and action items cannot be generated because there was no verbal conversation."}
+                    </p>
+                    <div className="flex items-center gap-1.5 text-[11px] text-amber-700 pt-0.5 font-medium">
+                      <Info className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span>If participants speak during a meeting—even simple words like &quot;Hi&quot; or &quot;Hello&quot;—the AI will automatically generate executive summaries and smart action items.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Left 7 Columns: Executive Overview, Key Points & Decisions */}
             <div className="lg:col-span-7 space-y-4">
               {/* Executive Overview Box */}
@@ -953,7 +994,11 @@ export function SummaryAndActionItemsCard({
                 {actionItems.length === 0 ? (
                   <div className="py-6 text-center text-xs text-slate-400 space-y-1">
                     <CheckSquare className="w-5 h-5 mx-auto text-slate-300" />
-                    <p>No actionable tasks identified from this discussion.</p>
+                    <p>
+                      {isNonVerbalSummary
+                        ? "No action items extracted because no verbal discussion occurred in this recording."
+                        : "No actionable tasks identified from this discussion."}
+                    </p>
                   </div>
                 ) : (
                   actionItems.map((item: MeetingActionItem) => {
