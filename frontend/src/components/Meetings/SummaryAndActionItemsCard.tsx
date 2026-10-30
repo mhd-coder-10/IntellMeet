@@ -599,13 +599,16 @@ export function SummaryAndActionItemsCard({
     return Math.round((completedCount / actionItems.length) * 100);
   }, [completedCount, actionItems.length]);
 
+  const isProcessing = generateMutation.isPending || summary?.status === "processing";
+
   const isNonVerbalSummary = useMemo(() => {
     if (!summary) return false;
+    if (isProcessing) return false;
     if (summary.hasSpokenContent === false) return true;
     return /no spoken discussion|no audible speech|background sound only|pure silence|ambient audio/i.test(
       summary.overview || ""
     );
-  }, [summary]);
+  }, [summary, isProcessing]);
 
   return (
     <div className="rounded-2xl border border-slate-200 shadow-sm overflow-hidden bg-white">
@@ -634,7 +637,7 @@ export function SummaryAndActionItemsCard({
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
-            {summary && (
+            {summary && !isProcessing && (
               <>
                 <Button
                   variant="outline"
@@ -671,7 +674,7 @@ export function SummaryAndActionItemsCard({
               </>
             )}
 
-            {summary ? (
+            {summary && !isProcessing ? (
               <div className="flex items-center gap-2">
                 {summary.isTrusted ? (
                   // TRUSTED & FINALIZED BADGE (Delete icon removed)
@@ -731,11 +734,11 @@ export function SummaryAndActionItemsCard({
                   }
                   generateMutation.mutate();
                 }}
-                disabled={generateMutation.isPending || isLoading || !canGenerate}
+                disabled={isProcessing || isLoading || !canGenerate}
                 title={!canGenerate ? "Recording required to generate summary" : undefined}
                 className="h-8 px-3 text-xs bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg shadow-sm gap-1.5 transition-all"
               >
-                {generateMutation.isPending ? (
+                {isProcessing ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     Generating Summary...
@@ -751,8 +754,8 @@ export function SummaryAndActionItemsCard({
           </div>
         </div>
 
-        {/* Quick Stats Pill (when summary exists) */}
-        {summary && (
+        {/* Quick Stats Pill (when summary exists and not actively processing) */}
+        {summary && !isProcessing && (
           <div className="flex items-center gap-4 mt-2.5 pt-2.5 border-t border-slate-800/80 text-xs text-slate-300 flex-wrap">
             <span className="flex items-center gap-1.5">
               <TrendingUp className="w-3.5 h-3.5 text-purple-400" />
@@ -791,6 +794,21 @@ export function SummaryAndActionItemsCard({
           <div className="py-8 flex flex-col items-center justify-center text-slate-400 gap-2.5">
             <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
             <p className="text-xs">Loading AI meeting summary...</p>
+          </div>
+        ) : isProcessing ? (
+          /* Processing State: Analyzing & extracting summary */
+          <div className="py-12 px-4 text-center max-w-sm mx-auto space-y-3.5">
+            <div className="w-12 h-12 mx-auto rounded-2xl bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600 shadow-xs">
+              <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold text-slate-800">
+                Generating Summary & Action Items...
+              </h3>
+              <p className="text-xs text-slate-500 leading-normal">
+                AI is analyzing discussion highlights, decisions, and smart task extraction. This usually takes just a few seconds.
+              </p>
+            </div>
           </div>
         ) : !summary ? (
           /* Empty State: Not generated yet */

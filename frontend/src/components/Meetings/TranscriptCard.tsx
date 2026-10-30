@@ -116,10 +116,7 @@ export function TranscriptCard({
     onMutate: () => {
       queryClient.setQueryData(
         ["meeting-transcript", meetingId, recordingIndex],
-        (old: any) =>
-          old
-            ? { ...old, status: "processing" }
-            : { status: "processing", segments: [], fullText: "" }
+        (old: any) => (old ? { ...old, status: "processing" } : undefined)
       );
     },
     onSuccess: (data: any) => {
@@ -234,14 +231,19 @@ export function TranscriptCard({
     return "AI Intelligence";
   }, []);
 
+  const isProcessing = generateMutation.isPending || transcript?.status === "processing";
+
   const isNonVerbalAudio = useMemo(() => {
     if (!transcript) return false;
+    if (isProcessing) return false;
     if (transcript.hasSpokenContent === false) return true;
-    if (!transcript.segments || transcript.segments.length === 0) return true;
+    if (!transcript.segments || transcript.segments.length === 0) {
+      return transcript.status === "completed" || Boolean(transcript.fullText);
+    }
     return /no spoken discussion|no audible speech|background sound only|pure silence|ambient audio/i.test(
       transcript.fullText || ""
     );
-  }, [transcript]);
+  }, [transcript, isProcessing]);
 
   return (
     <div className="rounded-2xl border border-slate-200 shadow-sm overflow-hidden bg-white">
@@ -270,7 +272,7 @@ export function TranscriptCard({
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
-            {transcript && (
+            {transcript && !isProcessing && (
               <>
                 <Button
                   variant="outline"
@@ -316,11 +318,11 @@ export function TranscriptCard({
                 }
                 generateMutation.mutate();
               }}
-              disabled={generateMutation.isPending || isLoading || !hasRecordings}
+              disabled={isProcessing || isLoading || !hasRecordings}
               title={!hasRecordings ? "Recording required to transcribe" : undefined}
               className="h-8 px-3 text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg shadow-sm gap-1.5 transition-all"
             >
-              {generateMutation.isPending ? (
+              {isProcessing ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   Generating...
@@ -340,8 +342,8 @@ export function TranscriptCard({
           </div>
         </div>
 
-        {/* Stats Row (when transcript exists) */}
-        {transcript && (
+        {/* Stats Row (when transcript exists and not actively processing) */}
+        {transcript && !isProcessing && (
           <div className="flex items-center gap-4 mt-2.5 pt-2.5 border-t border-slate-800/80 text-xs text-slate-300 flex-wrap">
             <span className="flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-indigo-400" />
@@ -375,6 +377,21 @@ export function TranscriptCard({
           <div className="py-8 flex flex-col items-center justify-center text-slate-400 gap-2.5">
             <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
             <p className="text-xs">Loading AI meeting transcript...</p>
+          </div>
+        ) : isProcessing ? (
+          /* Processing State: Analyzing & generating transcript */
+          <div className="py-12 px-4 text-center max-w-sm mx-auto space-y-3.5">
+            <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-xs">
+              <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold text-slate-800">
+                Transcribing Audio with AI...
+              </h3>
+              <p className="text-xs text-slate-500 leading-normal">
+                Analyzing speech, identifying speakers, and generating timestamps. This usually takes just a few seconds.
+              </p>
+            </div>
           </div>
         ) : !transcript ? (
           /* Empty State: Not generated yet */
