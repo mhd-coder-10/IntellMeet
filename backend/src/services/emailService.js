@@ -54,7 +54,7 @@ const sendMailUnified = async (opts) => {
         body: JSON.stringify({
           sender: {
             name: "IntellMeet",
-            email: process.env.BREVO_SENDER_EMAIL || process.env.SMTP_USER || "intellmeett16@gmail.com",
+            email: process.env.BREVO_SENDER_EMAIL || "mhd.developer10@gmail.com",
           },
           to: [{ email: to }],
           subject,
