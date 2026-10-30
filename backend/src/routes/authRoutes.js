@@ -61,8 +61,8 @@ router.get("/email-status", async (req, res) => {
 
     res.json({
       status: "OK",
-      provider: "nodemailer",
-      service: "gmail",
+      hasBrevoKey: !!process.env.BREVO_API_KEY,
+      hasResendKey: !!process.env.RESEND_API_KEY,
       hasSmtpUser: !!(process.env.SMTP_USER || process.env.EMAIL_USER),
       hasSmtpPass: !!(process.env.SMTP_PASS || process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD),
       smtpUser: (process.env.SMTP_USER || process.env.EMAIL_USER || "intellmeett16@gmail.com").slice(0, 4) + "***",

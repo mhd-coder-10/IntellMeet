@@ -4,7 +4,7 @@
 const nodemailer = require("nodemailer");
 
 // Initialize fresh robust Nodemailer transporter matching working Portfolio/Novise pattern
-const getTransporter = () => {
+const createRawTransporter = () => {
   const host = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp.gmail.com";
   const port = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT) || 465;
   const user = (process.env.SMTP_USER || process.env.EMAIL_USER || "intellmeett16@gmail.com").trim();
@@ -16,9 +16,9 @@ const getTransporter = () => {
       service: "gmail",
       auth: { user, pass },
       tls: { rejectUnauthorized: false },
-      connectionTimeout: 5000,
-      greetingTimeout: 5000,
-      socketTimeout: 6000,
+      connectionTimeout: 3000,
+      greetingTimeout: 3000,
+      socketTimeout: 3500,
     });
   }
 
@@ -28,10 +28,116 @@ const getTransporter = () => {
     secure: port === 465,
     auth: { user, pass },
     tls: { rejectUnauthorized: false },
-    connectionTimeout: 5000,
-    greetingTimeout: 5000,
-    socketTimeout: 6000,
+    connectionTimeout: 3000,
+    greetingTimeout: 3000,
+    socketTimeout: 3500,
   });
+};
+
+// Unified email dispatch: supports HTTP API (Brevo / Resend over Port 443) and direct SMTP
+const sendMailUnified = async (opts) => {
+  const to = opts.to;
+  const subject = opts.subject;
+  const html = opts.html;
+  const text = opts.text || "";
+
+  // 1. Brevo HTTP API (Port 443 / HTTPS - bypasses cloud free-tier SMTP port blocking)
+  if (process.env.BREVO_API_KEY) {
+    try {
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "api-key": process.env.BREVO_API_KEY.trim(),
+        },
+        body: JSON.stringify({
+          sender: {
+            name: "IntellMeet",
+            email: process.env.BREVO_SENDER_EMAIL || process.env.SMTP_USER || "intellmeett16@gmail.com",
+          },
+          to: [{ email: to }],
+          subject,
+          htmlContent: html,
+          textContent: text,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json().catch(() => ({}));
+        console.log(`[Email Service - Brevo HTTP] Email sent to ${to}:`, data.messageId || "ok");
+        return { messageId: data.messageId || "brevo-" + Date.now() };
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        console.warn(`[Email Service - Brevo HTTP] API returned status ${response.status}:`, errData);
+      }
+    } catch (httpErr) {
+      console.warn(`[Email Service - Brevo HTTP] Dispatch error:`, httpErr.message);
+    }
+  }
+
+  // 2. Resend HTTP API (Port 443 / HTTPS - bypasses cloud free-tier SMTP port blocking)
+  if (process.env.RESEND_API_KEY) {
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.RESEND_API_KEY.trim()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: process.env.RESEND_FROM || "IntellMeet <onboarding@resend.dev>",
+          to: [to],
+          subject,
+          html,
+          text,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json().catch(() => ({}));
+        console.log(`[Email Service - Resend HTTP] Email sent to ${to}:`, data.id || "ok");
+        return { messageId: data.id || "resend-" + Date.now() };
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        console.warn(`[Email Service - Resend HTTP] API returned status ${response.status}:`, errData);
+      }
+    } catch (httpErr) {
+      console.warn(`[Email Service - Resend HTTP] Dispatch error:`, httpErr.message);
+    }
+  }
+
+  // 3. Direct Nodemailer SMTP (with 3.5s timeout so Render free-tier firewall never blocks the server)
+  const transporter = createRawTransporter();
+  const info = await Promise.race([
+    transporter.sendMail({
+      from: opts.from || getFromAddress(),
+      to,
+      subject,
+      text,
+      html,
+    }),
+    new Promise((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              "SMTP connection timed out. (Render Free Tier blocks outbound ports 25, 465, and 587. Configure BREVO_API_KEY or RESEND_API_KEY on Port 443 for direct cloud delivery)"
+            )
+          ),
+        3500
+      )
+    ),
+  ]);
+
+  return info;
+};
+
+// Returns transporter interface compatible with all existing callers
+const getTransporter = () => {
+  return {
+    sendMail: sendMailUnified,
+  };
 };
 
 const getClientBaseUrl = () => {
@@ -654,11 +760,11 @@ const sendSignupOtpEmail = async ({
       html,
     });
 
-    console.log(`[Email Service] Signup OTP sent via Nodemailer to ${recipientEmail}`);
-    return { success: true, messageId: info?.messageId || "sent" };
+    console.log(`[Email Service] Signup OTP sent to ${recipientEmail}`);
+    return info;
   } catch (err) {
     console.error(`Failed to send signup OTP email to ${recipientEmail}:`, err.message);
-    return { success: false, error: err.message };
+    throw new Error(`Failed to send verification code email: ${err.message}`);
   }
 };
 
