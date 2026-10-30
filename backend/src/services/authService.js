@@ -31,17 +31,19 @@ const sendSignupOtp = async ({ email, name }) => {
     otp,
   })
 
-  // Send Email asynchronously without blocking response
-  // Even if SMTP fails (e.g. cloud hosting port blocking), user is not stuck
-  let emailSent = true
-  emailService.sendSignupOtpEmail({
-    recipientEmail: normalizedEmail,
-    recipientName: name || "there",
-    otp,
-  }).catch((err) => {
-    emailSent = false
-    console.warn(`[OTP Delivery Warning] SMTP send failed (${err.message}). OTP created in database.`)
-  })
+  // Send Email (await delivery so cloud host keeps container and network connection alive)
+  let emailSent = false;
+  try {
+    await emailService.sendSignupOtpEmail({
+      recipientEmail: normalizedEmail,
+      recipientName: name || "there",
+      otp,
+    });
+    emailSent = true;
+    console.log(`[Auth] Signup OTP successfully delivered to ${normalizedEmail}`);
+  } catch (err) {
+    console.warn(`[OTP Delivery Warning] Direct SMTP send failed (${err.message}). OTP created in database: ${otp}`);
+  }
 
   return {
     message: "Verification code sent to your email",

@@ -3,102 +3,29 @@
 
 const nodemailer = require("nodemailer");
 
-// Initialize transporter from environment variables or create test transporter
-let transporter = null;
+// Initialize fresh robust Nodemailer transporter matching working Portfolio/Novise pattern
+const getTransporter = () => {
+  const host = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp.gmail.com";
+  const port = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT) || 465;
+  const user = (process.env.SMTP_USER || process.env.EMAIL_USER || "intellmeett16@gmail.com").trim();
+  const rawPass = process.env.SMTP_PASS || process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD || "vxrcbafkjrkofhyo";
+  const pass = rawPass.trim().replace(/\s+/g, "");
 
-const getTransporter = async () => {
-  let smtpUser = process.env.SMTP_USER || process.env.EMAIL_USER;
-  let smtpPass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
-
-  if (!smtpUser || !smtpPass) {
-    try {
-      require("dotenv").config({ path: require("path").resolve(__dirname, "../../.env") });
-      smtpUser = process.env.SMTP_USER || process.env.EMAIL_USER;
-      smtpPass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
-      if (smtpUser && smtpPass) {
-        transporter = null; // Reset cached mock transporter
-      }
-    } catch (e) {
-      // ignore
-    }
-  }
-
-  if (transporter) return transporter;
-
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = Number(process.env.SMTP_PORT) || 587;
-  const smtpService = process.env.SMTP_SERVICE || process.env.EMAIL_SERVICE;
-
-  if (smtpHost && smtpUser) {
-    transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: process.env.SMTP_SECURE === "true" || smtpPort === 465,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass,
-      },
-      connectionTimeout: 8000,
-      greetingTimeout: 8000,
-      socketTimeout: 10000,
-      family: 4,
+  if (user.endsWith("@gmail.com") || host.includes("gmail")) {
+    return nodemailer.createTransport({
+      service: "gmail",
+      auth: { user, pass },
+      tls: { rejectUnauthorized: false },
     });
-    console.log(`[Email Service] Transporter initialized with SMTP host: ${smtpHost} (${smtpUser})`);
-  } else if (smtpUser && smtpPass) {
-    // Direct Gmail or named service
-    const service = smtpService || (smtpUser.includes("@gmail.com") ? "gmail" : undefined);
-    if (service) {
-      transporter = nodemailer.createTransport({
-        service,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-        connectionTimeout: 8000,
-      greetingTimeout: 8000,
-      socketTimeout: 10000,
-      family: 4,
-      });
-      console.log(`[Email Service] Transporter initialized with service: ${service} (${smtpUser})`);
-    } else {
-      transporter = nodemailer.createTransport({
-        host: "smtp.gmail.com",
-        port: 465,
-        secure: true,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-        connectionTimeout: 8000,
-      greetingTimeout: 8000,
-      socketTimeout: 10000,
-      family: 4,
-      });
-      console.log(`[Email Service] Transporter initialized with smtp.gmail.com (${smtpUser})`);
-    }
-  } else {
-    // Development fallback transporter or logging
-    console.warn(
-      "\n⚠️ [Email Service Warning] SMTP_USER and SMTP_PASS are not configured in backend/.env!\n" +
-      "Emails to real inboxes (Gmail/Outlook) cannot be delivered until you configure SMTP in backend/.env.\n" +
-      "Example for Gmail:\n" +
-      "SMTP_USER=your_email@gmail.com\n" +
-      "SMTP_PASS=your_16_digit_gmail_app_password\n"
-    );
-    try {
-      // Safe fast simulated transporter without network blocking
-      transporter = {
-        sendMail: async (opts) => {
-          console.log(`[Email Simulation] To: ${opts.to} | Subject: ${opts.subject}`);
-          return { messageId: "simulated-" + Date.now() };
-        },
-      };
-    } catch {
-      // fallback
-    }
   }
 
-  return transporter;
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+    tls: { rejectUnauthorized: false },
+  });
 };
 
 const getClientBaseUrl = () => {
@@ -107,12 +34,8 @@ const getClientBaseUrl = () => {
 
 // Returns authorized sender address matching configured SMTP credentials
 const getFromAddress = () => {
-  return (
-    process.env.EMAIL_FROM ||
-    (process.env.SMTP_USER
-      ? `"IntellMeet" <${process.env.SMTP_USER}>`
-      : '"IntellMeet" <notifications@intellmeet.com>')
-  );
+  const user = (process.env.SMTP_USER || process.env.EMAIL_USER || "intellmeett16@gmail.com").trim();
+  return process.env.EMAIL_FROM || `"IntellMeet" <${user}>`;
 };
 
 
@@ -717,14 +640,16 @@ const sendSignupOtpEmail = async ({
     </html>
     `;
 
-    await t.sendMail({
+    const info = await t.sendMail({
       from: fromAddress,
       to: recipientEmail,
       subject: `🔐 Your IntellMeet Verification Code: ${otp}`,
+      text: `Hello ${recipientName || "there"},\n\nYour IntellMeet verification code is: ${otp}\n\nValid for 10 minutes. Do not share this code with anyone.\n\n© ${new Date().getFullYear()} IntellMeet`,
       html,
     });
 
     console.log(`[Email Service] Signup OTP sent to ${recipientEmail}`);
+    return info;
   } catch (err) {
     console.error(`Failed to send signup OTP email to ${recipientEmail}:`, err.message);
     throw new Error(`Failed to send verification code email: ${err.message}`);

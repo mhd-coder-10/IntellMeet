@@ -36,6 +36,44 @@ const { authLimiter } = require("../middleware/rateLimiter.middleware")
  *       429:
  *         description: Too many requests
  */
+// Diagnostic endpoint to check and verify live SMTP health
+router.get("/email-status", async (req, res) => {
+  try {
+    const emailService = require("../services/emailService");
+    const testRecipient = req.query.email || process.env.SMTP_USER || "intellmeett16@gmail.com";
+    let sent = false;
+    let messageId = null;
+    let error = null;
+
+    if (req.query.send === "true") {
+      try {
+        const info = await emailService.sendSignupOtpEmail({
+          recipientEmail: testRecipient,
+          recipientName: "Test Diagnostic",
+          otp: "123456",
+        });
+        sent = true;
+        messageId = info?.messageId || "sent";
+      } catch (err) {
+        error = err.message;
+      }
+    }
+
+    res.json({
+      status: "OK",
+      hasSmtpUser: !!(process.env.SMTP_USER || process.env.EMAIL_USER),
+      hasSmtpPass: !!(process.env.SMTP_PASS || process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD),
+      smtpUser: (process.env.SMTP_USER || process.env.EMAIL_USER || "intellmeett16@gmail.com").slice(0, 4) + "***",
+      testRecipient,
+      sent,
+      messageId,
+      error,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.post("/send-signup-otp", authLimiter, authController.sendSignupOtp)
 
 /**
