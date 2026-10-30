@@ -99,7 +99,11 @@ export function TranscriptCard({
     queryKey: ["meeting-transcript", meetingId, recordingIndex],
     queryFn: () => getMeetingTranscript(meetingId, recordingIndex),
     enabled: !!meetingId,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data?.status === "processing" ? 3000 : false;
+    },
+    staleTime: 1000 * 30, // 30 seconds
   });
 
   // Mutation to generate or regenerate transcript
@@ -109,6 +113,15 @@ export function TranscriptCard({
         recordingIndex,
         forceRegenerate: true,
       }),
+    onMutate: () => {
+      queryClient.setQueryData(
+        ["meeting-transcript", meetingId, recordingIndex],
+        (old: any) =>
+          old
+            ? { ...old, status: "processing" }
+            : { status: "processing", segments: [], fullText: "" }
+      );
+    },
     onSuccess: (data: any) => {
       queryClient.setQueryData(
         ["meeting-transcript", meetingId, recordingIndex],
@@ -123,7 +136,27 @@ export function TranscriptCard({
         toast.success("AI Transcript generated successfully!");
       }
     },
-    onError: (err: any) => {
+    onError: async (err: any) => {
+      // In case of proxy/network timeout, verify if backend completed in background
+      try {
+        const latest = await getMeetingTranscript(meetingId, recordingIndex);
+        if (latest && (latest.status === "completed" || (latest.segments && latest.segments.length > 0))) {
+          queryClient.setQueryData(
+            ["meeting-transcript", meetingId, recordingIndex],
+            latest
+          );
+          if (latest.hasSpokenContent === false) {
+            toast.info(
+              "Audio processed: No spoken discussion detected in recording (silence or background sound only).",
+              { duration: 5000 }
+            );
+          } else {
+            toast.success("AI Transcript generated successfully!");
+          }
+          return;
+        }
+      } catch {}
+
       toast.error(err?.response?.data?.message || "Failed to generate transcript");
     },
   });

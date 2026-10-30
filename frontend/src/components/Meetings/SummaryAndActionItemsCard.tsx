@@ -181,7 +181,11 @@ export function SummaryAndActionItemsCard({
     queryKey: ["meeting-summary", meetingId],
     queryFn: () => getMeetingSummary(meetingId),
     enabled: !!meetingId,
-    staleTime: 1000 * 60 * 5,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data?.summary?.status === "processing" ? 3000 : false;
+    },
+    staleTime: 1000 * 30,
   });
 
   const summary = summaryData?.summary;
@@ -202,7 +206,24 @@ export function SummaryAndActionItemsCard({
         toast.success("AI Summary & Action Items generated successfully!");
       }
     },
-    onError: (err: any) => {
+    onError: async (err: any) => {
+      // In case of proxy/network timeout, check if backend completed in background
+      try {
+        const latest = await getMeetingSummary(meetingId);
+        if (latest?.summary && latest.summary.status === "completed") {
+          queryClient.setQueryData(["meeting-summary", meetingId], latest);
+          if (latest.summary.hasSpokenContent === false) {
+            toast.info(
+              "Audio processed: No spoken discussion detected. Summary & action items are not applicable.",
+              { duration: 5000 }
+            );
+          } else {
+            toast.success("AI Summary & Action Items generated successfully!");
+          }
+          return;
+        }
+      } catch {}
+
       toast.error(
         err?.response?.data?.message || "Failed to generate meeting summary"
       );
